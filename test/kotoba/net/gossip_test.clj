@@ -1,0 +1,89 @@
+(ns kotoba.net.gossip-test
+  (:require [clojure.test :refer [deftest testing is]]
+            [kotoba.net.gossip :as gossip]))
+
+(defn- mk-state []
+  (-> (gossip/empty-peer-state)
+      (gossip/add-peer "p1" #{"topic-a"})
+      (gossip/add-peer "p2" #{"topic-a"})
+      (gossip/add-peer "p3" #{"topic-a"})
+      (gossip/add-peer "p4" #{"topic-b"})))
+
+(deftest peer-state-test
+  (testing "subscribe/unsubscribe and peers-for-topic"
+    (let [s (mk-state)]
+      (is (= ["p1" "p2" "p3"] (gossip/peers-for-topic s "topic-a")))
+      (is (= ["p4"] (gossip/peers-for-topic s "topic-b")))
+      (let [s2 (gossip/unsubscribe s "p2" "topic-a")]
+        (is (= ["p1" "p3"] (gossip/peers-for-topic s2 "topic-a"))))
+      (let [s3 (gossip/subscribe s "p4" "topic-a")]
+        (is (= ["p1" "p2" "p3" "p4"] (gossip/peers-for-topic s3 "topic-a")))))))
+
+(deftest content-hash-test
+  (testing "same payload -> same hash, different payload -> different hash"
+    (is (= (gossip/content-hash "hello") (gossip/content-hash "hello")))
+    (is (not= (gossip/content-hash "hello") (gossip/content-hash "world")))
+    (is (re-matches #"[0-9a-f]{64}" (gossip/content-hash "hello")))))
+
+(deftest seen-cache-test
+  (testing "seen?/mark-seen basic dedup"
+    (let [c (gossip/empty-seen-cache 3)]
+      (is (false? (gossip/seen? c "h1")))
+      (let [c1 (gossip/mark-seen c "h1")]
+        (is (true? (gossip/seen? c1 "h1")))
+        (is (false? (gossip/seen? c1 "h2"))))))
+  (testing "bounded FIFO eviction at capacity"
+    (let [c (-> (gossip/empty-seen-cache 2)
+                (gossip/mark-seen "h1")
+                (gossip/mark-seen "h2")
+                (gossip/mark-seen "h3"))]
+      (is (false? (gossip/seen? c "h1")) "h1 evicted, oldest")
+      (is (true? (gossip/seen? c "h2")))
+      (is (true? (gossip/seen? c "h3")))
+      (is (= 2 (count (:order c))))))
+  (testing "re-marking an already-seen hash does not reorder / evict"
+    (let [c (-> (gossip/empty-seen-cache 2)
+                (gossip/mark-seen "h1")
+                (gossip/mark-seen "h2")
+                (gossip/mark-seen "h1"))]
+      (is (true? (gossip/seen? c "h1")))
+      (is (true? (gossip/seen? c "h2")))
+      (is (= ["h1" "h2"] (:order c))))))
+
+(deftest gossip-fanout-test
+  (testing "excludes self and sender, caps at degree d, deterministic order"
+    (let [s (mk-state)]
+      (is (= ["p2" "p3"] (gossip/gossip-fanout s "topic-a" #{"p1"} 6)))
+      (is (= ["p1"] (gossip/gossip-fanout s "topic-a" #{"p2" "p3"} 6)))
+      (is (= ["p1"] (gossip/gossip-fanout s "topic-a" #{"p2" "p3"} 1)))
+      (is (= [] (gossip/gossip-fanout s "topic-a" #{"p1" "p2" "p3"} 6)))))
+  (testing "unknown topic -> empty fanout"
+    (let [s (mk-state)]
+      (is (= [] (gossip/gossip-fanout s "topic-z" #{} 6))))))
+
+(deftest route-message-test
+  (testing "unknown message is marked seen and forwarded via fanout"
+    (let [s (mk-state)
+          cache (gossip/empty-seen-cache 10)
+          {:keys [seen-cache forward]}
+          (gossip/route-message s cache {:topic "topic-a" :payload "msg-1"
+                                          :from "p1" :self "self-id" :d 6})]
+      (is (= ["p2" "p3"] (mapv :to forward)))
+      (is (every? #(= "msg-1" (:payload %)) forward))
+      (is (true? (gossip/seen? seen-cache (gossip/content-hash "msg-1"))))))
+  (testing "duplicate message is dropped, cache unchanged, nothing forwarded"
+    (let [s (mk-state)
+          cache (gossip/mark-seen (gossip/empty-seen-cache 10)
+                                   (gossip/content-hash "msg-1"))
+          {:keys [seen-cache forward]}
+          (gossip/route-message s cache {:topic "topic-a" :payload "msg-1"
+                                          :from "p1" :self "self-id" :d 6})]
+      (is (= [] forward))
+      (is (= cache seen-cache))))
+  (testing "self is excluded from fanout even if subscribed"
+    (let [s (gossip/add-peer (mk-state) "self-id" #{"topic-a"})
+          cache (gossip/empty-seen-cache 10)
+          {:keys [forward]}
+          (gossip/route-message s cache {:topic "topic-a" :payload "msg-2"
+                                          :from "p1" :self "self-id" :d 6})]
+      (is (not (some #{"self-id"} (mapv :to forward)))))))
