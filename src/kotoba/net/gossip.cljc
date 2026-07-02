@@ -6,7 +6,13 @@
    Scope: this namespace implements *only* the routing/dedup semantics.
    It does not open sockets, dial peers, or perform any cryptographic
    handshake — see docs/ADR-kotoba-net-p2p-semantics.md."
-  (:require [clojure.string :as str])
+  (:require [clojure.string :as str]
+            ;; real ClojureScript needs these goog modules REQUIRED, not just
+            ;; name-referenced -- under shadow-cljs the bare `goog.crypt.Sha256.`
+            ;; call threw "Cannot read properties of undefined (reading 'Sha256')".
+            ;; (Another real-compiler gap invisible to lighter runtimes.)
+            #?@(:cljs [[goog.crypt :as gcrypt]
+                       [goog.crypt.Sha256]]))
   #?(:clj (:import [java.security MessageDigest])))
 
 ;; ---------------------------------------------------------------------------
@@ -26,7 +32,7 @@
                   digest (.digest md (.getBytes s "UTF-8"))]
               (bytes->hex digest))
        :cljs (let [sha (goog.crypt.Sha256.)]
-               (.update sha (goog.crypt/stringToUtf8ByteArray s))
+               (.update sha (gcrypt/stringToUtf8ByteArray s))
                (bytes->hex (.digest sha))))))
 
 ;; ---------------------------------------------------------------------------
