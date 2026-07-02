@@ -20,7 +20,15 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- bytes->hex [bs]
-  (apply str (map #(format "%02x" (bit-and % 0xff)) bs)))
+  ;; `format` is :clj-only -- under real ClojureScript the old
+  ;; (format "%02x" ...) version threw only when the lazy seq was realized,
+  ;; deep inside apply/str. Manual zero-padded hex is portable.
+  (apply str (map (fn [b]
+                    (let [v (bit-and b 0xff)
+                          h #?(:clj (Integer/toHexString v)
+                               :cljs (.toString v 16))]
+                      (if (= 1 (count h)) (str "0" h) h)))
+                  bs)))
 
 (defn content-hash
   "SHA-256 hex digest of `payload` (string or byte sequence). Used as the
