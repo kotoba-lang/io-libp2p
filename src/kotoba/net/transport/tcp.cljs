@@ -69,41 +69,34 @@
       kotoba-lang/dtn's optional :peer-secrets HMAC layer -- this namespace
       has no equivalent; every configured peer is trusted as given).
 
-  TWO REAL GAPS DISCOVERED IN kotoba.net.gossip WHILE WIRING THIS UP, NEITHER
-  FIXED BY EDITING gossip.cljc (out of scope for this phase -- worked around
-  entirely from this namespace instead; see README for the full writeup):
+  ONE REAL GAP DISCOVERED IN kotoba.net.gossip WHILE WIRING THIS UP:
 
-  1. `goog.crypt.Sha256` (kotoba.net.gossip/content-hash's :cljs branch) is a
-     real Google Closure Library class available for free under a full
-     Closure-Compiler build (shadow-cljs -- the environment gossip.cljc's own
-     top-of-file comment documents it was written against) but NOT bundled by
-     nbb (confirmed against a real nbb 1.4.210 install: it ships
-     goog.string/goog.crypt shims but no Sha256). See
-     `src/goog/crypt/Sha256.cljs` in this repo -- an nbb-classpath-only shim
-     (Node's built-in `node:crypto`, the same 'no npm dep, use Node core
-     crypto under nbb' pattern kotoba-lang/dtn's kotoba.dtn.auth already
-     established for its own HMAC-SHA256) that supplies exactly the two
-     methods gossip.cljc's content-hash calls, verified byte-for-byte against
-     known SHA-256 test vectors. `clojure -M:test` and a shadow-cljs build
-     are both unaffected -- this shim is never on either of those classpaths.
-  2. `kotoba.net.gossip/route-message` and `gossip-fanout` build their
-     internal exclude set via the LITERAL `#{from self}` syntax. Clojure's
-     (and ClojureScript's, and nbb's SCI) `#{}` set-literal reader macro
-     compiles to a CHECKED set constructor that throws
-     `IllegalArgumentException: Duplicate key: X` whenever two elements
-     evaluate to an EQUAL runtime value -- confirmed this is real, general
-     Clojure behavior (not an nbb-only quirk):
-     `clojure -M -e '(let [from \"a\" self \"a\"] #{from self})'` throws the
-     identical error under plain JVM Clojure. A locally-originated `publish!`
-     naturally has :from = :self (there is no previous hop to exclude for a
-     message this node itself originates), and gossip.cljc's own
-     route-message-test suite never exercises that case (its fixtures always
-     use distinct :from/:self values), so this landmine was never surfaced
-     until this real transport needed to actually call route-message for a
-     self-originated message. See `safe-from` below for the workaround (never
-     hand route-message a colliding :from/:self pair -- substitute nil,
-     which never matches a real peer-id, so the fanout-exclusion semantics
-     are unaffected)."
+  `goog.crypt.Sha256` (kotoba.net.gossip/content-hash's :cljs branch) is a
+  real Google Closure Library class available for free under a full
+  Closure-Compiler build (shadow-cljs -- the environment gossip.cljc's own
+  top-of-file comment documents it was written against) but NOT bundled by
+  nbb (confirmed against a real nbb 1.4.210 install: it ships
+  goog.string/goog.crypt shims but no Sha256). See
+  `src/goog/crypt/Sha256.cljs` in this repo -- an nbb-classpath-only shim
+  (Node's built-in `node:crypto`, the same 'no npm dep, use Node core
+  crypto under nbb' pattern kotoba-lang/dtn's kotoba.dtn.auth already
+  established for its own HMAC-SHA256) that supplies exactly the two
+  methods gossip.cljc's content-hash calls, verified byte-for-byte against
+  known SHA-256 test vectors. `clojure -M:test` and a shadow-cljs build
+  are both unaffected -- this shim is never on either of those classpaths.
+
+  A SECOND GAP THIS NAMESPACE USED TO WORK AROUND HAS SINCE BEEN FIXED AT
+  THE SOURCE: `kotoba.net.gossip/route-message` used to build its internal
+  exclude set via the LITERAL `#{from self}` syntax, which threw
+  `Duplicate key` whenever `:from` and `:self` evaluated equal -- exactly
+  what a locally-originated `publish!` naturally produces (there is no
+  previous hop to exclude for a message this node itself originates, only
+  self). This namespace used to route around it with a local `safe-from`
+  helper that substituted `nil` for a colliding `:from` before calling
+  `route-message`. gossip.cljc now builds that exclude set with
+  `(hash-set from self)` instead, which silently dedupes equal values
+  instead of throwing, so `safe-from` has been removed and every call-site
+  below hands `route-message` its real `:from`/`:self` values directly."
   (:require [kotoba.wire.tcp :as wire]
             [kotoba.wire.framing :as framing]
             [kotoba.wire.edn :as wedn]
@@ -167,42 +160,6 @@
            (resolve! msg)))))))
 
 ;; ---------------------------------------------------------------------------
-;; a real gossip.cljc landmine, worked around here without touching
-;; gossip.cljc itself -- see safe-from's docstring.
-;; ---------------------------------------------------------------------------
-
-(defn- safe-from
-  "kotoba.net.gossip/route-message and gossip-fanout build their internal
-  exclude set via the LITERAL `#{from self}` syntax (gossip.cljc). Both
-  Clojure's and ClojureScript's (and nbb's SCI) `#{}` set-LITERAL reader
-  macro compile to a CHECKED set constructor that throws
-  `IllegalArgumentException: Duplicate key: X` whenever two elements
-  evaluate to an EQUAL runtime value -- even though neither is a literal
-  constant, and unlike `hash-set`/`set`, which silently dedupe. Verified
-  this is real, general Clojure behavior (not an nbb-only quirk):
-  `clojure -M -e '(let [from \"a\" self \"a\"] #{from self})'` throws the
-  identical `Duplicate key: a` under plain JVM Clojure.
-
-  A locally-originated publish! naturally has :from = :self (there is no
-  'previous hop' to exclude for a message this node itself originates --
-  only itself), and an inbound message could, in principle (a
-  misconfigured or adversarial peer), claim :from equal to this node's
-  own id too. Either case hands route-message an input where :from =
-  :self and crashes it outright -- gossip.cljc's own existing
-  route-message-test suite never exercises this (its fixtures always use
-  distinct :from/:self values), so this landmine was never surfaced
-  there. See this repo's README for the full writeup; per this phase's
-  scope, gossip.cljc's pure semantics/API are NOT modified to fix this --
-  this namespace instead simply never hands route-message a colliding
-  pair: substitutes nil for `from` whenever it would otherwise equal
-  `self`. This is semantically correct either way, not just a crash
-  dodge -- nil never matches a real peer-id, so excluding it from a
-  fanout candidate list is a genuine no-op, and `self` (the exclusion
-  that actually matters) is still passed through unchanged."
-  [from self]
-  (if (= from self) nil from))
-
-;; ---------------------------------------------------------------------------
 ;; gossip delivery (shared by publish! and inbound re-forwarding)
 ;; ---------------------------------------------------------------------------
 
@@ -249,12 +206,13 @@
   message twice over two different wire paths (the redundant-forward case
   above) shows it exactly once in :received-messages, not duplicated.
 
-  :from is passed through safe-from before being handed to route-message
-  -- see that function's docstring for the real gossip.cljc crash this
-  avoids (a peer claiming :from equal to this node's own id)."
+  :from is handed to route-message unmodified, including the case where a
+  peer claims :from equal to this node's own id -- gossip.cljc's exclude
+  set is built with (hash-set from self), which dedupes equal values
+  instead of crashing, so no substitution is needed here."
   [node-handle-atom {:keys [topic payload from]}]
   (let [{:keys [node-id gossip-state seen-cache]} (deref node-handle-atom)
-        msg {:topic topic :payload payload :from (safe-from from node-id) :self node-id}
+        msg {:topic topic :payload payload :from from :self node-id}
         {new-seen-cache :seen-cache forward :forward} (gossip/route-message gossip-state seen-cache msg)
         fresh? (not= seen-cache new-seen-cache)]
     (swap! node-handle-atom
@@ -430,13 +388,14 @@
   {:to peer-id :payload payload}) -- the set of peers this call actually
   wrote to, for a caller/test that wants to confirm real fanout happened.
 
-  :from is passed through safe-from -- for a locally-originated message
-  :from and :self are ALWAYS equal (this node IS both, by construction),
-  which would otherwise unconditionally crash gossip.cljc's route-message
-  every single time; see safe-from's docstring."
+  :from is passed to route-message as node-id, genuinely equal to :self
+  (this node IS both the originator and itself, by construction) --
+  gossip.cljc's exclude set is built with (hash-set from self), which
+  dedupes that equal pair instead of crashing, so route-message correctly
+  excludes only this node's own id from the fanout candidates."
   [node-handle-atom topic payload]
   (let [{:keys [node-id gossip-state seen-cache]} (deref node-handle-atom)
-        msg {:topic topic :payload payload :from (safe-from node-id node-id) :self node-id}
+        msg {:topic topic :payload payload :from node-id :self node-id}
         {new-seen-cache :seen-cache forward :forward} (gossip/route-message gossip-state seen-cache msg)]
     (swap! node-handle-atom assoc :seen-cache new-seen-cache)
     (doseq [{:keys [to payload]} forward]

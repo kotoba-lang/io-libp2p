@@ -52,7 +52,7 @@ browser WebRTC, native Rust/Go adapter, etc.) can drive. See
 | | |
 |---|---|
 | Role | capability |
-| Tests | 53 assertions, all green (`clojure -M:test`, pure `.cljc` only) |
+| Tests | 56 assertions, all green (`clojure -M:test`, pure `.cljc` only) |
 | Real TCP transport (`kotoba.net.transport.tcp`) | yes — plain TCP via nbb, built on `kotoba-lang/wire`; E2E demo green (3/3 scenarios), see below |
 | Gossip fanout + dedup over real sockets | yes — real multi-node mesh delivery, seen-cache dedup proven to suppress redundant re-delivery across real OS processes |
 | Bitswap want/have over real sockets | yes — real request/response round-trip, matches pure `respond-to-want` |
@@ -95,7 +95,7 @@ actually moves `kotoba.net.gossip`/`kotoba.net.bitswap` protocol messages
 between real peers over real TCP sockets. It's `.cljs`, not `.cljc` — it
 only runs under a Node-hosted ClojureScript runtime
 ([`nbb`](https://github.com/babashka/nbb) in this repo) and is never
-loaded by the JVM `clojure -M:test` suite, so it cannot regress the 53
+loaded by the JVM `clojure -M:test` suite, so it cannot regress the 56
 pure-data assertions above.
 
 **Wire framing and socket-pool plumbing come from
@@ -132,8 +132,8 @@ of re-implementing that plumbing a second time.
 content a real host actually holds — that's host-injected) and
 `:commit-log` (a `[{:seq n :cid c} ...]` vector this node answers
 `:bitswap-commits-since` delta-sync requests from, same reasoning). See the
-namespace docstring for the full contract, including two real gaps
-discovered in `kotoba.net.gossip` while wiring this up — neither fixed by
+namespace docstring for the full contract, including one real gap
+discovered in `kotoba.net.gossip` while wiring this up — not fixed by
 editing `gossip.cljc` (out of scope for this transport work; worked around
 entirely from `kotoba.net.transport.tcp` instead):
 
@@ -147,14 +147,19 @@ entirely from `kotoba.net.transport.tcp` instead):
    `content-hash` calls, verified against known SHA-256 test vectors.
    `clojure -M:test` and a shadow-cljs build are unaffected — this shim is
    never on either of those classpaths.
-2. `route-message`/`gossip-fanout` build their exclude set via the literal
-   `#{from self}` syntax, which throws `Duplicate key` (real Clojure/
-   ClojureScript/SCI behavior, reproduced identically under plain JVM
-   `clojure -M -e`, not an nbb-only quirk) whenever `:from` and `:self`
-   evaluate to the same value — exactly what a locally-originated
-   `publish!` naturally produces (there's no previous hop to exclude, only
-   self). `kotoba.net.transport.tcp` never hands `route-message` a
-   colliding pair (see `safe-from` in the namespace source).
+
+A second gap that used to live here has since been **fixed at the source**:
+`route-message` used to build its exclude set via the literal `#{from
+self}` syntax, which threw `Duplicate key` (real Clojure/ClojureScript/SCI
+behavior, reproduced identically under plain JVM `clojure -M -e`, not an
+nbb-only quirk) whenever `:from` and `:self` evaluated to the same value —
+exactly what a locally-originated `publish!` naturally produces (there's no
+previous hop to exclude, only self). `route-message` now builds that set
+with `(hash-set from self)`, which silently dedupes equal values instead of
+throwing, so `kotoba.net.transport.tcp` no longer needs to route around it
+— every call-site hands `route-message` its real `:from`/`:self` values
+directly (the `safe-from` workaround that used to live in the namespace
+source has been removed).
 
 ### E2E demo (`test/kotoba/net/transport/tcp_demo.cljs`)
 

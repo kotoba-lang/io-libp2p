@@ -136,13 +136,23 @@
    If the message's content-hash is already in the seen-cache, it is
    dropped (forward is empty, cache is unchanged). Otherwise the hash is
    marked seen and the message is forwarded to gossip-fanout peers
-   (excluding self and the sender)."
+   (excluding self and the sender).
+
+   The exclude set is built with `(hash-set from self)` rather than the
+   literal `#{from self}` syntax: `#{...}` compiles to a CHECKED set
+   constructor that throws `Duplicate key` whenever two evaluated elements
+   turn out equal at runtime -- which happens on every self-originated
+   message, where `:from` and `:self` are naturally the same peer-id
+   (there is no previous hop to exclude). `hash-set` (like `set`/`conj`)
+   silently dedupes instead, which is the correct behavior here: the
+   exclude set's logical membership is unchanged either way, only the
+   crash is avoided."
   [state seen-cache {:keys [topic payload from self d]
                       :or {d 6}}]
   (let [h (content-hash payload)]
     (if (seen? seen-cache h)
       {:seen-cache seen-cache :forward []}
       (let [cache' (mark-seen seen-cache h)
-            targets (gossip-fanout state topic #{from self} d)]
+            targets (gossip-fanout state topic (hash-set from self) d)]
         {:seen-cache cache'
          :forward (mapv (fn [to] {:to to :payload payload}) targets)}))))

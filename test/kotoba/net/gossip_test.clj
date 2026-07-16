@@ -86,4 +86,29 @@
           {:keys [forward]}
           (gossip/route-message s cache {:topic "topic-a" :payload "msg-2"
                                           :from "p1" :self "self-id" :d 6})]
-      (is (not (some #{"self-id"} (mapv :to forward)))))))
+      (is (not (some #{"self-id"} (mapv :to forward))))))
+  (testing ":from equal to :self (a self-originated publish, e.g. a node
+            publishing a message it authored itself) does not throw --
+            regression test for the #{from self} literal-set 'Duplicate
+            key' crash the exclude set used to hit whenever :from and
+            :self evaluate equal at runtime -- and still produces the
+            correct deduped fanout (p1 excluded exactly once, p2/p3
+            still targeted)"
+    (let [s (mk-state)
+          cache (gossip/empty-seen-cache 10)
+          {:keys [forward]}
+          (gossip/route-message s cache {:topic "topic-a" :payload "msg-3"
+                                          :from "p1" :self "p1" :d 6})]
+      (is (= ["p2" "p3"] (mapv :to forward)))
+      (is (not (some #{"p1"} (mapv :to forward))))))
+  (testing ":from equal to :self also works when that shared id isn't
+            even a known/subscribed peer (a locally-originated publish
+            where :self is this node's own id, which is never itself
+            'subscribed' as a peer) -- forwards to every subscriber,
+            nothing excluded because self never appears among them"
+    (let [s (mk-state)
+          cache (gossip/empty-seen-cache 10)
+          {:keys [forward]}
+          (gossip/route-message s cache {:topic "topic-a" :payload "msg-4"
+                                          :from "self-id" :self "self-id" :d 6})]
+      (is (= ["p1" "p2" "p3"] (mapv :to forward))))))
