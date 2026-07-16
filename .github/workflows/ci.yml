@@ -9,6 +9,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # deps.edn depends on ../wire (io.github.kotoba-lang/wire, :local/root)
+      # for kotoba.net.transport.tcp's real socket I/O, which in turn
+      # depends on ../bytes -- both must be sibling checkouts for
+      # `clojure -M:test`'s classpath resolution to succeed, even though
+      # neither .cljs file is loaded by the JVM test suite itself.
+      - run: git clone --depth 1 https://github.com/kotoba-lang/wire.git ../wire
+      - run: git clone --depth 1 https://github.com/kotoba-lang/bytes.git ../bytes
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -17,3 +24,4 @@ jobs:
         with:
           cli: latest
       - run: clojure -M:test
+      - run: clojure -M:lint
