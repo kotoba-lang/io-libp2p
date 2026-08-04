@@ -20,10 +20,12 @@
             [libp2p.yamux :as yamux]
             [kotoba.net.libp2p.connection :as connection]
             [kotoba.net.libp2p.dial :as dial]
+            [kotoba.net.libp2p.handshake :as handshake]
             [kotoba.net.libp2p.identify :as identify]
             [kotoba.net.libp2p.keys :as keys]
             [kotoba.net.libp2p.serve :as serve]
-            [kotoba.net.libp2p.socket :as socket])
+            [kotoba.net.libp2p.socket :as socket]
+            [kotoba.net.libp2p.store :as store])
   (:import [java.net InetSocketAddress ServerSocket Socket]))
 
 (defn- fail! [problem data]
@@ -48,6 +50,11 @@
 ;; ---------------------------------------------------------------------------
 ;; Node state
 
+(defn peer-id-of
+  "The libp2p peer id a verified handshake identity denotes."
+  [peer]
+  (handshake/peer-id mf/sha256 (:identity-key-protobuf peer)))
+
 (defn dht-key
   "Peer id octets -> DHT key. The hash is injected into `kad.key` by design,
   so that namespace needs no crypto for one function; supplying it here keeps
@@ -61,7 +68,7 @@
   The routing table starts empty and stays empty until peers are LEARNED --
   seeding it from a hardcoded list would make every node's view of the network
   identical at startup, which is the opposite of what a DHT wants."
-  [{:keys [identity-public-key sign-fn verify-fn peer-id agent-version]}]
+  [{:keys [identity-public-key sign-fn verify-fn peer-id agent-version store-options]}]
   (when-not (and identity-public-key sign-fn peer-id)
     (fail! :node/identity-required {}))
   {:identity {:identity-public-key identity-public-key
@@ -70,26 +77,59 @@
               :peer-id peer-id
               :agent-version agent-version}
    :table (atom (table/create (dht-key peer-id)))
+   :store (atom (store/store (or store-options {})))
    :connections (atom {})
    :listen-addrs (atom [])})
+
+(declare probe! find-node!)
 
 (defn- remember!
   "Note a peer as seen. `kad.table` decides whether it is kept: a full bucket
   is not evicted on arrival, it returns a probe instruction, and that rule is
   the eclipse defence rather than an optimisation."
-  [{:keys [table]} peer-id addrs]
+  [{:keys [table] :as node} peer-id addrs]
   (let [id (vec peer-id)
         {next-table :table probe :probe}
         (table/note-seen @table
                          {:peer/id id :peer/dht-key (dht-key id) :peer/addrs (vec addrs)}
                          (System/currentTimeMillis))]
     (reset! table next-table)
-    ;; A full bucket returns a probe instruction rather than an eviction. Not
-    ;; pinging it yet is a real gap, and leaving the newcomer out is the SAFE
-    ;; side of it: the incumbent stays, which is what the rule protects.
-    {:probed probe}))
+    ;; Probing is asynchronous: a full bucket must not make the request that
+    ;; caused it wait on a round trip to a third party.
+    (when probe (future (try (probe! node probe) (catch Exception _ nil))))
+    {:probe probe}))
 
 (defn known-peers [{:keys [table]}] (table/all-peers @table))
+
+(defn- probe!
+  "Act on a full bucket rather than only reporting it.
+
+  `note-seen` returns a probe instruction because Kademlia does not evict on
+  arrival: it pings the least recently seen incumbent, and the newcomer is
+  admitted only if that peer is gone. Returning the instruction and doing
+  nothing with it -- which is what this did before -- keeps the safe half of
+  the rule (the incumbent stays) and loses the other half: a table full of dead
+  peers never makes room, and every lookup routed through it goes nowhere."
+  [node peer]
+  (let [address (first (:peer/addrs peer))
+        alive? (and address
+                    (try
+                      (let [connection (dial/dial! address (:identity node))]
+                        (try
+                          (let [stream (connection/stream! (:secure connection)
+                                                           (:session connection)
+                                                           serve/ping-protocol)
+                                nonce (vec (repeatedly serve/ping-size #(rand-int 256)))]
+                            ((:write! stream) nonce)
+                            (= nonce ((:read! stream) serve/ping-size)))
+                          (finally ((:close! connection)))))
+                      (catch Exception _ false)))]
+    (swap! (:table node)
+           (fn [table]
+             (if alive?
+               (table/probe-alive table (:peer/id peer))
+               (table/probe-dead table (:peer/id peer)))))
+    {:peer-id (:peer/id peer) :alive? alive?}))
 
 (defn- addr->octets
   "A multiaddr on the wire is octets. The table keeps the readable string
@@ -186,7 +226,7 @@
 
 (defn- handle-stream
   "Answer one inbound stream on a negotiated protocol."
-  [node _peer protocol port]
+  [node peer protocol port]
   (condp = protocol
     identify/protocol
     (do (write-message port (serve/identify-response
@@ -198,11 +238,29 @@
     "/ipfs/kad/1.0.0"
     ;; A kad stream carries a sequence of messages, not one.
     (loop []
-      (let [request (kad/decode (read-message port))]
-        (when-let [reply (serve/respond request
-                                        {:closest #(closest-peers node % 20)})]
-          (write-message port reply))
-        (recur)))
+      (let [request (kad/decode (read-message port))
+            {:keys [reply store]} (serve/respond
+                                   request
+                                   {:closest #(closest-peers node % 20)
+                                    :store @(:store node)
+                                    :now-ms (System/currentTimeMillis)
+                                    :peer-id (peer-id-of peer)
+                                    :peer-addrs []})]
+        (reset! (:store node) store)
+        (if reply
+          (do (write-message port reply) (recur))
+          ;; No reply is a real outcome -- a refused PUT_VALUE, an
+          ;; ADD_PROVIDER -- and the caller must be able to tell it apart from
+          ;; a slow answer. Closing says "nothing is coming"; staying silent
+          ;; makes the requester wait out a timeout that looks like a hang.
+          (when-let [close! (:close! port)] (close!)))))
+
+    serve/ping-protocol
+    ;; Echo exactly what arrived, forever: ping is a liveness probe and a peer
+    ;; may send several on one stream.
+    (loop []
+      ((:write! port) ((:read! port) serve/ping-size))
+      (recur))
 
     nil))
 
@@ -219,8 +277,8 @@
                                         :suite suite
                                         :static ((:dh-generate suite))))
             session (connection/accept! port)]
-        (remember! node (:identity-key peer) [])
-        (swap! (:connections node) assoc (vec (:identity-key peer)) {:peer peer})
+        (remember! node (peer-id-of peer) [])
+        (swap! (:connections node) assoc (peer-id-of peer) {:peer peer})
         (serve-streams! port session (set serve/supported-protocols)
                                    (fn [protocol stream]
                                      (handle-stream node peer protocol stream))))
@@ -249,26 +307,59 @@
 ;; ---------------------------------------------------------------------------
 ;; Querying
 
+(def replies-to
+  "Which requests a peer answers. ADD_PROVIDER does not, by design, and a
+  caller that waited for one would hang on every successful announcement."
+  #{(kad/message-type :find-node)
+    (kad/message-type :get-value)
+    (kad/message-type :get-providers)
+    (kad/message-type :put-value)})
+
 (defn query!
   "Open a kad stream to ADDRESS and send one request, returning the reply.
 
   Every peer named in the reply is remembered: a lookup that discarded what it
   learned would re-discover the same network on every query, which is most of
-  what a routing table exists to avoid."
+  what a routing table exists to avoid.
+
+  Returns nil when the request expects no answer, or when the peer closed
+  instead of answering -- a refusal, which is a result rather than a fault."
   [node address request]
   (let [connection (dial/dial! address (:identity node))]
     (try
       (let [stream (connection/stream! (:secure connection) (:session connection)
                                        "/ipfs/kad/1.0.0")]
         (write-message stream (kad/encode request))
-        (let [reply (kad/decode (read-message stream))]
-          (doseq [peer (:closer-peers reply)]
-            ;; Addresses arrive as octets and are kept as strings: a table
-            ;; entry exists to be dialed, and the dialer takes a multiaddr.
-            (remember! node (:id peer) (keep octets->addr (:addrs peer))))
-          (remember! node (get-in connection [:peer :identity-key]) [])
+        (let [reply (when (contains? replies-to (:type request))
+                      (try (kad/decode (read-message stream))
+                           (catch Exception _ nil)))]
+          (when reply
+            (doseq [peer (:closer-peers reply)]
+              ;; Addresses arrive as octets and are kept as strings: a table
+              ;; entry exists to be dialed, and the dialer takes a multiaddr.
+              (remember! node (:id peer) (keep octets->addr (:addrs peer)))))
+          (remember! node (peer-id-of (:peer connection)) [])
           reply))
       (finally ((:close! connection))))))
+
+(defn refresh-buckets!
+  "Look up a random key in each bucket's range, to keep the table fresh.
+
+  Without this a table only learns from traffic it happens to see, which for a
+  quiet node is almost none: buckets never fill, lookups route through the few
+  peers that once talked to us, and the node's answers get worse the longer it
+  runs. Kademlia's own answer is to refresh a bucket that has gone unused, and
+  a random key inside its range is what makes the lookup land there.
+
+  Returns what each refresh found, so a caller can see the table growing rather
+  than trust that it did."
+  ([node] (refresh-buckets! node {}))
+  ([node {:keys [buckets] :or {buckets 4}}]
+   (mapv (fn [_]
+           (let [target (vec (repeatedly 32 #(rand-int 256)))]
+             (try (assoc (find-node! node target {:max-rounds 2}) :target-random? true)
+                  (catch Exception e {:failed (.getMessage e)}))))
+         (range buckets))))
 
 (defn find-node!
   "Iterative FIND_NODE for TARGET, driven by `kad.lookup`.
