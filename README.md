@@ -8,6 +8,44 @@ live in the (now-deleted, see `kotoba-lang/kotoba` PR #259 and
 libp2p (QUIC transport + Noise handshake + GossipSub) with a bitswap-style
 block exchange.
 
+## libp2p connection (`kotoba.net.libp2p.*`)
+
+Every layer of a libp2p connection already existed in this workspace as a pure
+state machine with no socket — `libp2p.multistream` and `libp2p.yamux`
+(`io-libp2p-specs-transport`), the XX pattern (`kotoba-lang/noise`), the
+addresses (`multiformats.multiaddr`), the DHT protocol
+(`io-libp2p-specs-kad-dht`). What was missing was a socket and the thing that
+runs them in order:
+
+```
+TCP → multistream(/noise) → Noise XX → multistream(/yamux) → Yamux
+                                                               ↓
+                                 multistream(<protocol>) per stream
+```
+
+| ns | role |
+|---|---|
+| `handshake` | libp2p's identity binding: the `noise-libp2p-static-key:` signature that ties a peer id to a Noise static key |
+| `keys` | JVM verification for Ed25519 / RSA / ECDSA identity keys |
+| `identify` | `/ipfs/id/1.0.0`, and the one claim in it that can be checked |
+| `connection` | the driver: three stacked framings, in order, over an injected port |
+| `socket` | TCP mechanism only — connect, read exactly n, write, close |
+| `dial` | assembly: multiaddr in, authenticated connection out |
+
+### What is verified against the real network, and what is not
+
+**Working against public IPFS peers** (measured 2026-08-04): TCP connect,
+multistream `/noise`, the full Noise XX handshake, and libp2p identity
+verification — against both an Ed25519 peer (`bitswap.filebase.io`) and an RSA
+one (`104.131.131.82`). The peer's identity key is proven, not accepted.
+
+**Not working yet**: the muxer step. Both peers close the connection after the
+`/yamux/1.0.0` proposal on the encrypted channel, and the cause is not isolated
+— decryption of their traffic succeeds, so the failure is in what we send or in
+a negotiation detail, not in the cipher orientation. Until that is understood,
+this dials and identifies peers; it does not open streams to them, and it is
+not a DHT node.
+
 ## Scope
 
 **In scope — pure, transport-independent, deterministic functions:**
