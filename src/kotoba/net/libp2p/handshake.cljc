@@ -58,6 +58,30 @@
   (pb/encode public-key-schema
              {:type (:ed25519 key-types) :data (->octets raw-public-key)}))
 
+(def identity-multihash-limit
+  "libp2p inlines a public key into the peer id when the key protobuf is at
+  most 42 octets -- which is every Ed25519 key and no RSA key. Above it the id
+  is a SHA-256 multihash instead."
+  42)
+
+(defn peer-id
+  "The libp2p peer id for an identity key protobuf.
+
+  Not the raw key and not the protobuf: the id is a MULTIHASH of the protobuf,
+  and which multihash depends on its size. Using the raw key gives an id nobody
+  else computes, and the mistake is invisible until something keys on it --
+  a provider record filed under the wrong id is stored, returned, and simply
+  never matches."
+  [sha256-fn key-protobuf]
+  (let [pb (vec key-protobuf)]
+    (if (<= (count pb) identity-multihash-limit)
+      ;; identity multihash: code 0x00, then the length, then the bytes
+      (vec (concat [0x00 (count pb)] pb))
+      (vec (concat [0x12 0x20]
+                   (map #(bit-and % 0xFF)
+                        (vec (seq (sha256-fn #?(:clj (byte-array (map unchecked-byte pb))
+                                                :cljs (js/Uint8Array.from (clj->js pb))))))))))))
+
 (defn signing-input
   "The exact bytes an identity key signs: the prefix, then our Noise static
   public key."

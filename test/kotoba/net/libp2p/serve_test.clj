@@ -8,6 +8,7 @@
             [kotoba.net.libp2p.dnsaddr :as dnsaddr]
             [kotoba.net.libp2p.identify :as identify]
             [kotoba.net.libp2p.serve :as serve]
+            [kotoba.net.libp2p.store :as store]
             [multiformats.multiaddr :as multiaddr]))
 
 (defn- seed [n] (byte-array (map unchecked-byte (repeat 32 n))))
@@ -35,20 +36,35 @@
            (mapv vec (:listen-addrs parsed))))
     (is (= address (multiaddr/->string (vec (first (:listen-addrs parsed))))))))
 
+(defn- answer [request context]
+  (serve/respond request (merge {:closest (constantly [])
+                                 :store (store/store {})
+                                 :now-ms 0
+                                 :peer-id [7]}
+                                context)))
+
 (deftest find-node-is-answered-with-the-peers-we-were-given
   (let [closest [{:id [1 2 3] :addrs [(vec (multiaddr/->octets "/ip4/1.2.3.4/tcp/4001"))]
                   :connection 0}]
-        request (kad/find-node [9 9 9])
-        reply (kad/decode (serve/respond request {:closest (constantly closest)}))]
+        reply (kad/decode (:reply (answer (kad/find-node [9 9 9])
+                                          {:closest (constantly closest)})))]
     (is (= (kad/message-type :find-node) (:type reply)))
     (is (= 1 (count (:closer-peers reply))))
     (is (= [1 2 3] (vec (:id (first (:closer-peers reply))))))))
 
-(deftest a-request-we-do-not-serve-produces-no-reply
-  ;; PUT_VALUE is accepted and not stored. Answering as though it were stored
-  ;; would make this node advertise itself as a replica it is not.
-  (is (nil? (serve/respond {:type (kad/message-type :put-value) :key [1]}
-                           {:closest (constantly [])}))))
+(deftest a-record-the-validator-refuses-is-not-answered-as-stored
+  ;; Answering as though it were stored would make this node advertise itself
+  ;; as a replica it is not.
+  (let [{:keys [reply store]} (answer (kad/put-value [1] [2]) {})]
+    (is (nil? reply))
+    (is (nil? (store/get-record store [1])))))
+
+(deftest a-provider-is-recorded-under-the-connections-peer-id
+  ;; Never the one in the message: a node that took it from the payload would
+  ;; let anyone advertise anyone else as a provider.
+  (let [{:keys [store]} (answer {:type (kad/message-type :add-provider) :key [5]}
+                                {:peer-id [9 9] :peer-addrs []})]
+    (is (= [[9 9]] (mapv :id (store/providers store [5] 0))))))
 
 (deftest a-dnsaddr-is-filtered-to-the-peer-it-named
   ;; A host may answer for several peers. Taking the first record because it
@@ -65,3 +81,15 @@
   (is (true? (dnsaddr/dnsaddr? "/dnsaddr/bootstrap.libp2p.io")))
   (is (false? (dnsaddr/dnsaddr? "/ip4/1.2.3.4/tcp/4001")))
   (is (nil? (dnsaddr/resolve-address "/ip4/1.2.3.4/tcp/4001"))))
+
+(deftest a-node-without-an-agent-version-still-reports-one
+  ;; `:or` applies when a key is ABSENT. A node built without an agent version
+  ;; passes it as an explicit nil, which encodes as "" and makes the peer report
+  ;; `AgentVersion: ""` -- indistinguishable from a broken identify.
+  (let [parsed (identify/parse
+                (serve/identify-response {:identity-public-key (ed/pubkey-from-seed (seed 1))
+                                          :agent-version nil}))]
+    (is (= serve/default-agent-version (:agent-version parsed)))))
+
+(deftest ping-is-advertised-because-it-is-answered
+  (is (some #{serve/ping-protocol} serve/supported-protocols)))

@@ -34,6 +34,7 @@ TCP → multistream(/noise) → Noise XX → multistream(/yamux) → Yamux
 | `serve` | what to answer: identify snapshot, kad replies from a routing table |
 | `node` | listen, answer, remember, and look up — `kad.table` + `kad.lookup` driven over a socket |
 | `dnsaddr` | `/dnsaddr/…` TXT resolution, filtered to the peer id it names |
+| `store` | records (validated, deny-by-default) and providers (expiring), both bounded |
 
 ### What is verified against the real network
 
@@ -61,12 +62,29 @@ table (verified between two of our own nodes: a FIND_NODE served from a table
 of three peers, and the caller learned five). `kad.table` owns the eviction
 rule and `kad.lookup` the iterative search; neither is reimplemented here.
 
-**What is still missing to be a good citizen**, precisely: a full bucket
-returns a probe instruction that nothing yet acts on (the newcomer is dropped,
-which is the safe side of the rule but not the rule); PUT_VALUE and
-ADD_PROVIDER are accepted and not stored, so this node must not be counted as a
-replica; and there is no periodic bucket refresh, so the table only learns from
-traffic it happens to see.
+It now serves the rest of what a participant owes:
+
+- **records**, with validation **injected and deny-by-default**. The DHT has no
+  universal notion of a valid record — only per-namespace rules — and a node
+  that accepts what it cannot check is worse than one that accepts nothing: it
+  becomes a confident source of whatever it was handed. `/pk/` is included
+  because it is self-validating; everything else is the operator's decision.
+- **providers**, which expire (48 h). Nobody can verify a provider claim from
+  here and it is not meant to be verifiable — it is checked by going and
+  asking. What matters is that it stops being advertised when it goes stale.
+  The provider is recorded under the **connection's** peer id, never the one in
+  the message, or anyone could advertise anyone else.
+- **`/ipfs/ping/1.0.0`**, both directions. `ipfs ping` against this node
+  returns a Pong.
+- **probes**: a full bucket returns an instruction to ping the least recently
+  seen incumbent, and that now happens. Returning it and doing nothing kept the
+  safe half of Kademlia's rule (the incumbent stays) and lost the other: a
+  table full of dead peers never makes room.
+- **bucket refresh**, so the table learns from more than the traffic it happens
+  to see.
+
+Both stores are bounded — an unbounded one is a memory-exhaustion vector
+reachable by anyone who can send a message.
 
 **Transports**: TCP only. QUIC would need a QUIC stack, and libp2p TLS a
 certificate carrying the libp2p extension — neither exists here and neither is
