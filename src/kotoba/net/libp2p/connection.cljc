@@ -179,38 +179,97 @@
   (negotiate secure yamux-protocol)
   (volatile! (yamux/session :dialer)))
 
-(defn- read-yamux-frame [port]
-  (let [header ((:read! port) 12)
-        decoded (yamux/decode (vec header))
-        length (:length decoded)]
-    (if (= :data (:type decoded))
-      (assoc decoded :payload (if (pos? length) (vec ((:read! port) length)) []))
-      ;; A window update's `length` is a credit delta and nothing follows it.
-      ;; Reading it as a byte count consumes the next header as payload and
-      ;; desynchronizes the connection permanently, with no error.
-      (assoc decoded :payload []))))
+(defn- header-length
+  "The `length` field of a raw Yamux header, octets 8..11 big-endian."
+  [header]
+  (reduce (fn [acc i] (+ (* 256 acc) (bit-and (nth header i) 0xFF))) 0 (range 8 12)))
+
+(defn- read-yamux-frame
+  "Read one frame: the twelve-octet header, then a DATA payload if there is one.
+
+  `yamux/decode` returns `{:frame … :rest …}`, not the frame -- it is written
+  for a buffer that may hold part of a frame or several. Reading its fields off
+  the wrapper yields nil for every one of them, which is not a parse error and
+  does not throw: `:type` is nil, so nothing looks like DATA, so no payload is
+  ever consumed, and the next read takes that payload as a header. The
+  connection desynchronizes on the first frame and the peer sees garbage. That
+  was the whole of the bug this file spent a day on -- it presented as a peer
+  resetting a connection it had just accepted."
+  [port]
+  (let [header (vec ((:read! port) 12))
+        {:keys [frame error]} (yamux/decode header)]
+    (cond
+      error (fail! :libp2p/yamux-decode-failed {:error error})
+      frame frame
+      ;; No frame and no error means DATA whose payload has not arrived yet;
+      ;; the header says how much to read.
+      :else (let [length (header-length header)
+                  payload (if (pos? length) (vec ((:read! port) length)) [])]
+              (or (:frame (yamux/decode (into header payload)))
+                  (fail! :libp2p/yamux-decode-failed {:length length}))))))
+
+(defn pump!
+  "Read one Yamux frame and dispatch it.
+
+  A connection is not one stream. The moment a libp2p peer accepts us it opens
+  streams of ITS own -- go-libp2p dials `/ipfs/id/1.0.0` at us immediately --
+  and it pings, and it returns flow-control credit. A reader that waited only
+  for frames on the stream it opened would silently drop all of that, and the
+  peer would conclude we are broken: measured against a local Kubo node, its
+  identify negotiation timed out after 5 s and it tore the connection down,
+  which surfaced here as `Connection reset` after a handshake that had
+  succeeded.
+
+  Inbound streams are RESET rather than ignored. This side speaks no inbound
+  protocol yet, and a reset says so in one frame; silence makes the peer wait
+  out a timeout before concluding the same thing, and a timeout is
+  indistinguishable from a hang."
+  [secure session inboxes]
+  (let [frame (read-yamux-frame secure)
+        id (:stream-id frame)
+        flags (:flags frame)]
+    (cond
+      (= :ping (:type frame))
+      (when-not (contains? flags :ack)
+        ((:write! secure) (yamux/ping (:length frame) :ack? true)))
+
+      (= :go-away (:type frame))
+      (vswap! inboxes assoc :closed true)
+
+      ;; A stream this side did not open. Parity says so: a dialer opens odd
+      ;; ids, so an even one is theirs.
+      (and (contains? flags :syn) (not (contains? @inboxes id)))
+      (let [reset (yamux/reset-stream @session id)]
+        (vreset! session (:session reset))
+        ((:write! secure) (:out reset)))
+
+      (= :data (:type frame))
+      (when (contains? @inboxes id)
+        (vswap! inboxes update id into (:payload frame)))
+
+      :else nil)
+    frame))
 
 (defn stream!
   "Open a Yamux stream and negotiate PROTOCOL on it.
 
   Returns a port for the stream, so a caller speaks its protocol without
-  knowing anything about frames."
+  knowing anything about frames -- while every other frame on the connection is
+  still answered."
   [secure session protocol]
   (let [{next-session :session stream-id :stream-id syn :out} (yamux/open-stream @session)
         _ (vreset! session next-session)
         ;; The SYN is a zero-length DATA frame; it opens the stream before any
         ;; payload rides it.
         _ (write-frame secure syn)
-        inbox (volatile! [])
+        inboxes (volatile! {stream-id []})
         port {:read! (fn [n]
-                       (while (< (count @inbox) n)
-                         (let [frame (read-yamux-frame secure)]
-                           (when (= stream-id (:stream-id frame))
-                             (vswap! inbox into (:payload frame)))))
-                       (let [taken (vec (take n @inbox))]
-                         (vswap! inbox #(vec (drop n %)))
+                       (while (< (count (get @inboxes stream-id)) n)
+                         (pump! secure session inboxes))
+                       (let [taken (vec (take n (get @inboxes stream-id)))]
+                         (vswap! inboxes update stream-id #(vec (drop n %)))
                          taken))
               :write! (fn [octets]
                         (write-frame secure (yamux/data-frame stream-id #{} (vec octets))))}]
     (negotiate port protocol)
-    (assoc port :stream-id stream-id)))
+    (assoc port :stream-id stream-id :inboxes inboxes)))
