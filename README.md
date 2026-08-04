@@ -31,6 +31,9 @@ TCP → multistream(/noise) → Noise XX → multistream(/yamux) → Yamux
 | `connection` | the driver: three stacked framings, in order, over an injected port |
 | `socket` | TCP mechanism only — connect, read exactly n, write, close |
 | `dial` | assembly: multiaddr in, authenticated connection out |
+| `serve` | what to answer: identify snapshot, kad replies from a routing table |
+| `node` | listen, answer, remember, and look up — `kad.table` + `kad.lookup` driven over a socket |
+| `dnsaddr` | `/dnsaddr/…` TXT resolution, filtered to the peer id it names |
 
 ### What is verified against the real network
 
@@ -43,10 +46,32 @@ whole stack, end to end:
 | Yamux stream + `/ipfs/id/1.0.0` | `kubo/0.41.0/Homebrew`, 12 protocols; identity consistent with the handshake |
 | `/ipfs/kad/1.0.0` FIND_NODE | real reply, 20 closer peers |
 
-**Still not a DHT node.** This is a client: it dials, identifies, and queries.
-It holds no routing table, answers nobody's queries, and resets every inbound
-stream, so it takes from the DHT without serving it. `kad.table` and
-`kad.lookup` are the missing halves and they already exist.
+It is now a **node**, not only a client. Measured against Kubo 0.41:
+
+```
+$ ipfs swarm connect /ip4/127.0.0.1/tcp/45021/p2p/12D3KooWKYvKSgn…
+connect 12D3KooWKYvKSgn… success
+$ ipfs id 12D3KooWKYvKSgn…
+"AgentVersion": "kotoba-libp2p/0.1"
+```
+
+go-libp2p dialed us, completed the responder handshake, identified us, and
+lists us as a peer. A node also answers `/ipfs/kad/1.0.0` from its routing
+table (verified between two of our own nodes: a FIND_NODE served from a table
+of three peers, and the caller learned five). `kad.table` owns the eviction
+rule and `kad.lookup` the iterative search; neither is reimplemented here.
+
+**What is still missing to be a good citizen**, precisely: a full bucket
+returns a probe instruction that nothing yet acts on (the newcomer is dropped,
+which is the safe side of the rule but not the rule); PUT_VALUE and
+ADD_PROVIDER are accepted and not stored, so this node must not be counted as a
+replica; and there is no periodic bucket refresh, so the table only learns from
+traffic it happens to see.
+
+**Transports**: TCP only. QUIC would need a QUIC stack, and libp2p TLS a
+certificate carrying the libp2p extension — neither exists here and neither is
+a small addition. mplex is not implemented; yamux is what every current peer
+negotiates.
 
 ### The two bugs that cost the most, and how they presented
 
