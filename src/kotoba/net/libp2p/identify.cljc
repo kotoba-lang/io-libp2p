@@ -19,12 +19,17 @@
 (def protocol "/ipfs/id/1.0.0")
 
 (def schema
-  {5 {:name :public-key :type :bytes}
-   2 {:name :listen-addrs :type :bytes :repeated? true}
+  "The field numbers are the spec's, and they are not in a memorable order:
+  `publicKey` is 1, `protocols` is 3, `protocolVersion` is 5 and `agentVersion`
+  is 6. Getting them wrong does not fail -- protobuf skips fields it has no
+  entry for -- so a mis-numbered schema silently returns nil for everything it
+  misnamed and a short list for what it did not."
+  {1 {:name :public-key :type :bytes}
+   2 {:name :listen-addrs :type :bytes :repeated true}
+   3 {:name :protocols :type :string :repeated true}
    4 {:name :observed-addr :type :bytes}
-   3 {:name :protocols :type :string :repeated? true}
-   6 {:name :protocol-version :type :string}
-   7 {:name :agent-version :type :string}})
+   5 {:name :protocol-version :type :string}
+   6 {:name :agent-version :type :string}})
 
 (defn parse
   "Decode an identify message. Returns a map with the claims as claims."

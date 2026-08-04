@@ -32,19 +32,41 @@ TCP → multistream(/noise) → Noise XX → multistream(/yamux) → Yamux
 | `socket` | TCP mechanism only — connect, read exactly n, write, close |
 | `dial` | assembly: multiaddr in, authenticated connection out |
 
-### What is verified against the real network, and what is not
+### What is verified against the real network
 
-**Working against public IPFS peers** (measured 2026-08-04): TCP connect,
-multistream `/noise`, the full Noise XX handshake, and libp2p identity
-verification — against both an Ed25519 peer (`bitswap.filebase.io`) and an RSA
-one (`104.131.131.82`). The peer's identity key is proven, not accepted.
+Measured 2026-08-04 against public IPFS peers and a local Kubo 0.41 node — the
+whole stack, end to end:
 
-**Not working yet**: the muxer step. Both peers close the connection after the
-`/yamux/1.0.0` proposal on the encrypted channel, and the cause is not isolated
-— decryption of their traffic succeeds, so the failure is in what we send or in
-a negotiation detail, not in the cipher orientation. Until that is understood,
-this dials and identifies peers; it does not open streams to them, and it is
-not a DHT node.
+| | result |
+|---|---|
+| TCP + multistream + Noise XX + identity verification | Ed25519 peer (`megaphone`) and RSA peer (`kubo/0.32.1/mars.i.ipfs.io`) |
+| Yamux stream + `/ipfs/id/1.0.0` | `kubo/0.41.0/Homebrew`, 12 protocols; identity consistent with the handshake |
+| `/ipfs/kad/1.0.0` FIND_NODE | real reply, 20 closer peers |
+
+**Still not a DHT node.** This is a client: it dials, identifies, and queries.
+It holds no routing table, answers nobody's queries, and resets every inbound
+stream, so it takes from the DHT without serving it. `kad.table` and
+`kad.lookup` are the missing halves and they already exist.
+
+### The two bugs that cost the most, and how they presented
+
+Both were silent, and both looked like the peer's fault.
+
+`yamux/decode` returns `{:frame … :rest …}`, not the frame. Reading its fields
+off the wrapper yielded nil for every one, so nothing looked like DATA, no
+payload was ever consumed, and the next read took that payload as a header. The
+connection desynchronized on the first frame and the peer — which had just
+accepted us — reset it. What made this hard was the symptom: a `Connection
+reset` immediately after a handshake that had visibly succeeded, pointing
+attention at the crypto rather than at a `get` on the wrong map.
+
+The second is that **a connection is not one stream**. go-libp2p opens
+`/ipfs/id/1.0.0` at us the moment it accepts, and it pings. A reader that
+waited only for its own stream dropped all of it; the peer's negotiation timed
+out after 5 s and it tore the connection down. Only the peer's own logs said
+so — from this side it was another unexplained reset. Inbound streams are now
+reset explicitly, which answers in one frame instead of making the peer wait
+out a timeout that is indistinguishable from a hang.
 
 ## Scope
 
