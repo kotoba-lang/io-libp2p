@@ -1,0 +1,315 @@
+(ns kotoba.net.libp2p.node
+  "A libp2p node: it dials, it listens, it answers, and it keeps a routing table.
+
+  The difference between this and the dialer is not features but posture. A
+  client asks the network for answers and gives none back; for a DHT that is
+  not merely impolite, because a node nobody can reach occupies no useful
+  position in the keyspace and its own lookups get worse answers than a serving
+  peer's. Listening, answering `/ipfs/kad/1.0.0`, and remembering who answered
+  are one change, not three.
+
+  `kad.table` owns the routing table and its eviction rule; `kad.lookup` owns
+  the iterative search. Neither is re-implemented here -- this supplies the
+  socket and the loop they were written to be driven by."
+  (:require [kad.key :as kad-key]
+            [multiformats.multiaddr :as multiaddr]
+            [multiformats.core :as mf]
+            [kad.lookup :as lookup]
+            [kad.message :as kad]
+            [kad.table :as table]
+            [libp2p.yamux :as yamux]
+            [kotoba.net.libp2p.connection :as connection]
+            [kotoba.net.libp2p.dial :as dial]
+            [kotoba.net.libp2p.identify :as identify]
+            [kotoba.net.libp2p.keys :as keys]
+            [kotoba.net.libp2p.serve :as serve]
+            [kotoba.net.libp2p.socket :as socket])
+  (:import [java.net InetSocketAddress ServerSocket Socket]))
+
+(defn- fail! [problem data]
+  (throw (ex-info (name problem) (assoc data :problem problem))))
+
+(defn- varint [n]
+  (loop [n n out []]
+    (if (< n 128) (conj out n) (recur (quot n 128) (conj out (bit-or 0x80 (bit-and n 0x7F)))))))
+
+(defn- read-varint [port]
+  (loop [shift 0 acc 0]
+    (let [b (nth ((:read! port) 1) 0)
+          acc (bit-or acc (bit-shift-left (bit-and b 0x7F) shift))]
+      (if (zero? (bit-and b 0x80)) acc (recur (+ shift 7) acc)))))
+
+(defn- read-message [port]
+  ((:read! port) (read-varint port)))
+
+(defn- write-message [port octets]
+  ((:write! port) (into (varint (count octets)) octets)))
+
+;; ---------------------------------------------------------------------------
+;; Node state
+
+(defn dht-key
+  "Peer id octets -> DHT key. The hash is injected into `kad.key` by design,
+  so that namespace needs no crypto for one function; supplying it here keeps
+  every DHT key in this node derived the same way."
+  [peer-id]
+  (kad-key/dht-key mf/sha256 (vec peer-id)))
+
+(defn node
+  "Create a node. `identity` supplies the keys; nothing is generated here.
+
+  The routing table starts empty and stays empty until peers are LEARNED --
+  seeding it from a hardcoded list would make every node's view of the network
+  identical at startup, which is the opposite of what a DHT wants."
+  [{:keys [identity-public-key sign-fn verify-fn peer-id agent-version]}]
+  (when-not (and identity-public-key sign-fn peer-id)
+    (fail! :node/identity-required {}))
+  {:identity {:identity-public-key identity-public-key
+              :sign-fn sign-fn
+              :verify-fn (or verify-fn (keys/verifier))
+              :peer-id peer-id
+              :agent-version agent-version}
+   :table (atom (table/create (dht-key peer-id)))
+   :connections (atom {})
+   :listen-addrs (atom [])})
+
+(defn- remember!
+  "Note a peer as seen. `kad.table` decides whether it is kept: a full bucket
+  is not evicted on arrival, it returns a probe instruction, and that rule is
+  the eclipse defence rather than an optimisation."
+  [{:keys [table]} peer-id addrs]
+  (let [id (vec peer-id)
+        {next-table :table probe :probe}
+        (table/note-seen @table
+                         {:peer/id id :peer/dht-key (dht-key id) :peer/addrs (vec addrs)}
+                         (System/currentTimeMillis))]
+    (reset! table next-table)
+    ;; A full bucket returns a probe instruction rather than an eviction. Not
+    ;; pinging it yet is a real gap, and leaving the newcomer out is the SAFE
+    ;; side of it: the incumbent stays, which is what the rule protects.
+    {:probed probe}))
+
+(defn known-peers [{:keys [table]}] (table/all-peers @table))
+
+(defn- addr->octets
+  "A multiaddr on the wire is octets. The table keeps the readable string
+  because that is what gets dialed, so the conversion happens here -- and it
+  has to, because protobuf will length-prefix a string into a `bytes` field
+  without complaint and the peer will report only that it could not read the
+  message. That is exactly how this was wrong twice: once in identify's
+  `listenAddrs` and once here."
+  [address]
+  (if (string? address) (multiaddr/->octets address) (vec address)))
+
+(defn- octets->addr [octets]
+  (try (multiaddr/->string (vec octets)) (catch Exception _ nil)))
+
+(defn closest-peers
+  "The peers this node would offer for a key. The whole of what it can serve."
+  [{:keys [table]} key n]
+  (->> (table/closest @table (dht-key key) n)
+       (mapv (fn [peer] {:id (vec (:peer/id peer))
+                         :addrs (mapv addr->octets (or (:peer/addrs peer) []))
+                         :connection 0}))))
+
+;; ---------------------------------------------------------------------------
+;; Serving
+
+(defn serve-streams!
+  "Answer inbound streams until the connection ends.
+
+  Lives here, not in `connection`, because it needs threads: that file is
+  `.cljc` and a serving loop written with `future` and `Thread/sleep` would
+  make it portable in name only.
+
+  This is what turns a client into a participant. `handle` is
+  `(fn [protocol port] …)`; it is called once the protocol is negotiated, and
+  a protocol the caller does not support is refused with `na` by
+  `accept-negotiation` rather than by silence -- a peer that gets no answer
+  waits out a timeout it cannot distinguish from a hang.
+
+  Runs on its own thread because a serving connection is inherently concurrent:
+  the peer may open a stream at any moment, including while we are waiting for
+  a reply on one of ours."
+  [secure session supported handle]
+  (let [inboxes (volatile! {})]
+    (loop []
+      (let [frame (try (connection/read-yamux-frame secure)
+                       (catch Exception _ nil))]
+        (when frame
+          (let [id (:stream-id frame)
+                flags (:flags frame)]
+            (cond
+              (= :ping (:type frame))
+              (when-not (contains? flags :ack)
+                ((:write! secure) (yamux/ping (:length frame) :ack? true)))
+
+              (and (contains? flags :syn) (not (contains? @inboxes id)))
+              (let [accepted (yamux/accept-stream @session id)]
+                (vreset! session (:session accepted))
+                (vswap! inboxes assoc id [])
+                ((:write! secure) (:out accepted))
+                ;; The stream is served on its own thread; the frame loop must
+                ;; keep reading, or a handler that waits for more input on its
+                ;; own stream would deadlock the connection it is reading from.
+                (let [port {:read! (fn [n]
+                                     (loop []
+                                       (when (< (count (get @inboxes id)) n)
+                                         (Thread/sleep 2)
+                                         (recur)))
+                                     (let [taken (vec (take n (get @inboxes id)))]
+                                       (vswap! inboxes update id #(vec (drop n %)))
+                                       taken))
+                            :write! (fn [octets]
+                                      ((:write! secure)
+                                       (yamux/data-frame id #{} (vec octets))))
+                            :close! (fn []
+                                      ;; FIN, not RST: we are done sending and
+                                      ;; the peer may still send to us. A
+                                      ;; one-message protocol like identify
+                                      ;; reads until the writer says it has
+                                      ;; finished, and without this it waits.
+                                      (let [closed (yamux/close-stream @session id)]
+                                        (vreset! session (:session closed))
+                                        ((:write! secure) (:out closed))))}]
+                  (future
+                    (try
+                      (handle (connection/accept-negotiation port supported) port)
+                      (catch Exception _ nil)))))
+
+              (= :data (:type frame))
+              (when (contains? @inboxes id)
+                (vswap! inboxes update id into (:payload frame)))
+
+              :else nil)
+            (recur)))))))
+
+(defn- handle-stream
+  "Answer one inbound stream on a negotiated protocol."
+  [node _peer protocol port]
+  (condp = protocol
+    identify/protocol
+    (do (write-message port (serve/identify-response
+                             (assoc (:identity node)
+                                    :listen-addrs @(:listen-addrs node))))
+        ;; Identify is one message. Saying so is part of the protocol.
+        (when-let [close! (:close! port)] (close!)))
+
+    "/ipfs/kad/1.0.0"
+    ;; A kad stream carries a sequence of messages, not one.
+    (loop []
+      (let [request (kad/decode (read-message port))]
+        (when-let [reply (serve/respond request
+                                        {:closest #(closest-peers node % 20)})]
+          (write-message port reply))
+        (recur)))
+
+    nil))
+
+(defn- serve-connection!
+  "Run one accepted connection: handshake as responder, then answer streams."
+  [node ^Socket socket]
+  (future
+    (try
+      (let [connected (socket/wrap socket)
+            suite (dial/noise-suite)
+            {:keys [port peer]} (connection/accept-handshake!
+                                 (:port connected)
+                                 (assoc (:identity node)
+                                        :suite suite
+                                        :static ((:dh-generate suite))))
+            session (connection/accept! port)]
+        (remember! node (:identity-key peer) [])
+        (swap! (:connections node) assoc (vec (:identity-key peer)) {:peer peer})
+        (serve-streams! port session (set serve/supported-protocols)
+                                   (fn [protocol stream]
+                                     (handle-stream node peer protocol stream))))
+      (catch Exception _ nil)
+      (finally (try (.close socket) (catch Exception _ nil))))))
+
+(defn listen!
+  "Start accepting connections. Returns `{:port :stop!}`."
+  [node {:keys [port host] :or {port 0 host "127.0.0.1"}}]
+  (let [server (ServerSocket.)]
+    (.bind server (InetSocketAddress. ^String host ^int (int port)))
+    (reset! (:listen-addrs node)
+            [(str "/ip4/" host "/tcp/" (.getLocalPort server))])
+    (let [running (atom true)
+          accepting (future
+                      (while @running
+                        (try (serve-connection! node (.accept server))
+                             (catch Exception _ nil))))]
+      {:port (.getLocalPort server)
+       :host host
+       :stop! (fn []
+                (reset! running false)
+                (try (.close server) (catch Exception _ nil))
+                (future-cancel accepting))})))
+
+;; ---------------------------------------------------------------------------
+;; Querying
+
+(defn query!
+  "Open a kad stream to ADDRESS and send one request, returning the reply.
+
+  Every peer named in the reply is remembered: a lookup that discarded what it
+  learned would re-discover the same network on every query, which is most of
+  what a routing table exists to avoid."
+  [node address request]
+  (let [connection (dial/dial! address (:identity node))]
+    (try
+      (let [stream (connection/stream! (:secure connection) (:session connection)
+                                       "/ipfs/kad/1.0.0")]
+        (write-message stream (kad/encode request))
+        (let [reply (kad/decode (read-message stream))]
+          (doseq [peer (:closer-peers reply)]
+            ;; Addresses arrive as octets and are kept as strings: a table
+            ;; entry exists to be dialed, and the dialer takes a multiaddr.
+            (remember! node (:id peer) (keep octets->addr (:addrs peer))))
+          (remember! node (get-in connection [:peer :identity-key]) [])
+          reply))
+      (finally ((:close! connection))))))
+
+(defn find-node!
+  "Iterative FIND_NODE for TARGET, driven by `kad.lookup`.
+
+  The state machine decides who to ask next and when to stop; this supplies the
+  network. Keeping them apart is what makes α-parallelism and the termination
+  rule testable with no network at all -- and it is why a peer that does not
+  answer is recorded as failed rather than retried forever."
+  ([node target] (find-node! node target {}))
+  ([node target {:keys [alpha k max-rounds] :or {alpha 3 k 20 max-rounds 8}}]
+   (let [target-key (dht-key target)
+         seed (table/closest @(:table node) target-key k)]
+     (loop [state (lookup/start target-key seed {:alpha alpha :k k})
+            round 0]
+       (let [queries (lookup/next-queries state)]
+         (if (or (empty? queries) (>= round max-rounds) (lookup/done? state))
+           {:closest (vec (take k (:lookup/shortlist state)))
+            :rounds round
+            :queried (count (:lookup/queried state))
+            :failed (count (:lookup/failed state))}
+           (let [answers
+                 (doall
+                  (for [peer queries]
+                    (if-let [address (first (:peer/addrs peer))]
+                      (try
+                        (let [reply (query! node address (kad/find-node (vec target)))]
+                          {:peer peer
+                           :closer (mapv (fn [p]
+                                           (let [id (vec (:id p))]
+                                             {:peer/id id
+                                              :peer/dht-key (dht-key id)
+                                              :peer/addrs (vec (or (:addrs p) []))}))
+                                         (:closer-peers reply))})
+                        (catch Exception _ {:peer peer :failed? true}))
+                      ;; Known by id but not by address: nothing to dial, and
+                      ;; pretending otherwise would spin the lookup on it.
+                      {:peer peer :failed? true})))
+                 next-state (reduce (fn [st {:keys [peer closer failed?]}]
+                                      (if failed?
+                                        (lookup/failure st (:peer/id peer))
+                                        (lookup/response st (:peer/id peer) closer)))
+                                    state
+                                    answers)]
+             (recur (lookup/round state next-state) (inc round)))))))))

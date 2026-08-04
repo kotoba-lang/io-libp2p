@@ -75,6 +75,31 @@
            (.write ^OutputStream out (byte-array (map unchecked-byte octets)))
            (.flush ^OutputStream out))}}))))
 
+(defn wrap
+  "Wrap an already-accepted socket in the same `{:read! :write!}` port a dialed
+  connection uses. A listener and a dialer differ in who connected, not in how
+  bytes move."
+  ([socket] (wrap socket default-read-timeout-ms))
+  ([^Socket socket read-timeout-ms]
+   (.setSoTimeout socket (int read-timeout-ms))
+   (.setTcpNoDelay socket true)
+   (let [in (.getInputStream socket)
+         out (.getOutputStream socket)]
+     {:socket socket
+      :close! (fn [] (try (.close socket) (catch Exception _ nil)))
+      :port {:read! (fn [n]
+                      (let [buffer (byte-array n)]
+                        (loop [read 0]
+                          (if (= read n)
+                            (vec (map #(bit-and % 0xff) buffer))
+                            (let [got (.read ^InputStream in buffer read (- n read))]
+                              (when (neg? got)
+                                (fail! :socket/closed-early {:wanted n :got read}))
+                              (recur (+ read got)))))))
+             :write! (fn [octets]
+                       (.write ^OutputStream out (byte-array (map unchecked-byte octets)))
+                       (.flush ^OutputStream out))}})))
+
 (defn pair
   "Two ports wired to each other in memory, for testing a dialer against a
   listener without a network."

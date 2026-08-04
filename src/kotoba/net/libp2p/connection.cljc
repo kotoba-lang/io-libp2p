@@ -89,6 +89,22 @@
 (defn- write-multistream-message [port text]
   ((:write! port) (ms/encode text)))
 
+(defn accept-negotiation
+  "The listener half of multistream: read a proposal and answer it.
+
+  A responder that echoed whatever it was offered would speak protocols it does
+  not implement; `na` is a real answer and the dialer is required to try its
+  next choice or give up."
+  [port supported]
+  (loop [state (ms/listener supported)]
+    (let [message (read-multistream-message port)
+          {:keys [listener out done failed]} (ms/listener-recv state message)]
+      (when out ((:write! port) out))
+      (cond
+        failed (fail! :libp2p/multistream-listener-failed {:reason failed})
+        done done
+        :else (recur listener)))))
+
 (defn negotiate
   "Propose PROTOCOL over PORT and require the peer to echo it.
 
@@ -168,6 +184,33 @@
        :peer (assoc verified :noise-static-key (:rs hs))
        :handshake-hash (:handshake-hash hs)})))
 
+(defn accept-handshake!
+  "The responder side of multistream(/noise) + XX.
+
+  Same three messages in the same order, with the roles swapped: we read msg1,
+  write msg2 carrying OUR payload, and read msg3 carrying theirs. The verified
+  peer identity comes out the same way, and for the same reason -- the static
+  key is the handshake's, not the payload's."
+  [port {:keys [suite static identity-public-key sign-fn verify-fn prologue]}]
+  (accept-negotiation port #{noise-protocol})
+  (let [payload (identity/payload {:identity-public-key identity-public-key
+                                   :noise-static-public-key (:pub static)
+                                   :sign-fn sign-fn})
+        hs (noise/initialize {:suite suite :pattern :XX :initiator? false
+                              :s static :prologue (or prologue [])})
+        [hs _] (noise/read-message hs (read-u16-frame port))
+        [hs msg2] (noise/write-message hs payload)
+        _ (write-u16-frame port msg2)
+        [hs their-payload] (noise/read-message hs (read-u16-frame port))]
+    (when-not (:done? hs)
+      (fail! :libp2p/handshake-incomplete {}))
+    (let [verified (identity/verify their-payload (:rs hs) verify-fn)]
+      (when-not (:ok? verified)
+        (fail! :libp2p/peer-identity-unverified (dissoc verified :ok?)))
+      {:port (secure-port port (:send-cs hs) (:recv-cs hs))
+       :peer (assoc verified :noise-static-key (:rs hs))
+       :handshake-hash (:handshake-hash hs)})))
+
 ;; ---------------------------------------------------------------------------
 ;; Muxed streams
 
@@ -179,12 +222,22 @@
   (negotiate secure yamux-protocol)
   (volatile! (yamux/session :dialer)))
 
+(defn accept!
+  "The listener half: accept a muxer proposal and return a session handle.
+
+  The session's role decides stream-id parity, and getting it wrong is not a
+  handshake error -- both sides simply start choosing the same ids for
+  different streams and each reads the other's data as its own."
+  [secure]
+  (accept-negotiation secure #{yamux-protocol})
+  (volatile! (yamux/session :listener)))
+
 (defn- header-length
   "The `length` field of a raw Yamux header, octets 8..11 big-endian."
   [header]
   (reduce (fn [acc i] (+ (* 256 acc) (bit-and (nth header i) 0xFF))) 0 (range 8 12)))
 
-(defn- read-yamux-frame
+(defn read-yamux-frame
   "Read one frame: the twelve-octet header, then a DATA payload if there is one.
 
   `yamux/decode` returns `{:frame … :rest …}`, not the frame -- it is written
