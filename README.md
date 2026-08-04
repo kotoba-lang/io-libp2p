@@ -35,6 +35,7 @@ TCP → multistream(/noise) → Noise XX → multistream(/yamux) → Yamux
 | `node` | listen, answer, remember, and look up — `kad.table` + `kad.lookup` driven over a socket |
 | `dnsaddr` | `/dnsaddr/…` TXT resolution, filtered to the peer id it names |
 | `store` | records (validated, deny-by-default) and providers (expiring), both bounded |
+| `validate` | concrete validators — `/ipns/` (signature, expiry, sequence) and `/pk/` |
 
 ### What is verified against the real network
 
@@ -85,6 +86,20 @@ It now serves the rest of what a participant owes:
 
 Both stores are bounded — an unbounded one is a memory-exhaustion vector
 reachable by anyone who can send a message.
+
+`validate/validators` supplies the `/ipns/` rule, whose three parts are checked
+separately because two of them are the ones usually skipped: the signature must
+verify **under the key the DHT key names** (a record carrying its own key would
+verify perfectly and prove nothing); the record must not be expired; and a newer
+record must beat an older one, or an attacker who cannot forge a signature can
+still pin the network to an old value by racing to publish it.
+
+`announce!` sends ADD_PROVIDER to the peers closest to the key — which is what
+makes a provider record findable by someone who does not know us — and records
+the claim locally, since a node that told the network but not itself would
+answer GET_PROVIDERS without naming itself. `republish!` re-announces only what
+*we* provide; provider records expire, so announcing once means being advertised
+until the TTL and then silently not. The interval belongs to the caller.
 
 **Transports**: TCP only. QUIC would need a QUIC stack, and libp2p TLS a
 certificate carrying the libp2p extension — neither exists here and neither is

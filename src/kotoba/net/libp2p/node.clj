@@ -81,7 +81,7 @@
    :connections (atom {})
    :listen-addrs (atom [])})
 
-(declare probe! find-node!)
+(declare probe! find-node! query!)
 
 (defn- remember!
   "Note a peer as seen. `kad.table` decides whether it is kept: a full bucket
@@ -341,6 +341,57 @@
           (remember! node (peer-id-of (:peer connection)) [])
           reply))
       (finally ((:close! connection))))))
+
+(defn announce!
+  "Tell the network we provide KEY, and store the claim ourselves.
+
+  Sent to the peers closest to the key rather than to everyone we know: that is
+  what makes a provider record findable by someone who does not know us, since
+  a requester walks toward the key and only meets the peers near it.
+
+  Re-announcing is not optional. Provider records expire, so a node that
+  announces once and stops is advertised until the TTL and then silently is
+  not -- the block is still there and nobody is told."
+  ([node key] (announce! node key {}))
+  ([node key {:keys [replicas] :or {replicas 10}}]
+   (let [self (get-in node [:identity :peer-id])
+         targets (take replicas (table/closest @(:table node) (dht-key key)))
+         sent (doall
+               (for [peer targets
+                     :let [address (first (:peer/addrs peer))]
+                     :when address]
+                 (try
+                   (query! node address
+                           {:type (kad/message-type :add-provider)
+                            :key (vec key)
+                            :provider-peers [{:id (vec self)
+                                              :addrs (mapv addr->octets @(:listen-addrs node))
+                                              :connection 0}]})
+                   {:peer (:peer/id peer) :sent? true}
+                   (catch Exception _ {:peer (:peer/id peer) :sent? false}))))]
+     ;; We are a provider of what we announce, and a node that told the network
+     ;; but not itself would answer GET_PROVIDERS without naming itself.
+     (swap! (:store node) #(:store (store/add-provider % key self @(:listen-addrs node)
+                                                       (System/currentTimeMillis))))
+     {:key (vec key) :announced (count (filter :sent? sent)) :attempted (count sent)})))
+
+(defn republish!
+  "Re-announce everything we provide, and re-put every record we hold.
+
+  The interval belongs to the caller: a node that scheduled its own timer would
+  be a second thing to shut down, and the right period depends on the TTL a
+  deployment chose rather than on this library."
+  [node]
+  (let [store @(:store node)
+        keys (vec (keys (:store/providers store)))
+        self (get-in node [:identity :peer-id])]
+    {:providers (mapv (fn [key]
+                        ;; Only what WE provide. Re-announcing someone else's
+                        ;; claim would put our name on a block we do not have.
+                        (when (some #(= (vec self) (vec (:id %)))
+                                    (store/providers store key (System/currentTimeMillis)))
+                          (announce! node key)))
+                      keys)}))
 
 (defn refresh-buckets!
   "Look up a random key in each bucket's range, to keep the table fresh.

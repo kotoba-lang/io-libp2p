@@ -19,6 +19,13 @@
         ;; Ed25519 for the identity key the peer id is derived from. Injected
         ;; into the driver rather than required by it -- the driver holds no
         ;; keys -- but the tests and CLI need a concrete signer.
+        ;; The IPNS record validator. Kept in its own namespace so a node that
+        ;; validates nothing never loads it -- the store stays
+        ;; validator-injected, and this is one concrete validator rather than a
+        ;; special case inside the store.
+        io.github.kotoba-lang/tech-ipfs-specs-ipns
+        {:git/url "https://github.com/kotoba-lang/tech-ipfs-specs-ipns.git"
+         :git/sha "ba5c9696c1d3474e52c6a3cdc4d92ed5f7985fa3"}
         io.github.kotoba-lang/org-ietf-ed25519
         {:git/url "https://github.com/kotoba-lang/org-ietf-ed25519.git"
          :git/sha "fdcefb9f1b83461fee54d04b63e374fa301ee847"}

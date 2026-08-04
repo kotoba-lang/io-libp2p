@@ -37,14 +37,25 @@
   [_key _value]
   false)
 
+(defn accept-newer
+  "The default supersede rule: any validated record replaces what is held.
+
+  Correct only for namespaces where the newest write wins. `/ipns/` is not one
+  of them -- records carry a sequence number, and a node that overwrote
+  unconditionally would let a replayed older record win by arriving second."
+  [_held _candidate]
+  true)
+
 (defn store
-  [{:keys [validator record-limit provider-limit providers-per-key provider-ttl-ms]
+  [{:keys [validator supersede? record-limit provider-limit providers-per-key provider-ttl-ms]
     :or {validator deny-all
+         supersede? accept-newer
          record-limit default-record-limit
          provider-limit default-provider-limit
          providers-per-key default-providers-per-key
          provider-ttl-ms default-provider-ttl-ms}}]
   {:store/validator validator
+   :store/supersede? supersede?
    :store/record-limit record-limit
    :store/provider-limit provider-limit
    :store/providers-per-key providers-per-key
@@ -69,6 +80,10 @@
       (and (>= (count (:store/records store)) (:store/record-limit store))
            (not (contains? (:store/records store) k)))
       {:store store :stored? false :reason :record-limit}
+
+      (when-let [held (get-in store [:store/records k])]
+        (not ((:store/supersede? store) (:value held) (vec value))))
+      {:store store :stored? false :reason :not-newer}
 
       :else
       {:store (assoc-in store [:store/records k]
