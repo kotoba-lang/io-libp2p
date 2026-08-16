@@ -11,7 +11,8 @@
   `kad.table` owns the routing table and its eviction rule; `kad.lookup` owns
   the iterative search. Neither is re-implemented here -- this supplies the
   socket and the loop they were written to be driven by."
-  (:require [kad.key :as kad-key]
+  (:require [clojure.set :as set]
+            [kad.key :as kad-key]
             [multiformats.multiaddr :as multiaddr]
             [multiformats.core :as mf]
             [kad.lookup :as lookup]
@@ -68,9 +69,14 @@
   The routing table starts empty and stays empty until peers are LEARNED --
   seeding it from a hardcoded list would make every node's view of the network
   identical at startup, which is the opposite of what a DHT wants."
-  [{:keys [identity-public-key sign-fn verify-fn peer-id agent-version store-options]}]
+  [{:keys [identity-public-key sign-fn verify-fn peer-id agent-version store-options
+           protocol-handlers]}]
   (when-not (and identity-public-key sign-fn peer-id)
     (fail! :node/identity-required {}))
+  (when-not (and (or (nil? protocol-handlers) (map? protocol-handlers))
+                 (every? string? (keys protocol-handlers))
+                 (every? fn? (vals protocol-handlers)))
+    (fail! :node/invalid-protocol-handlers {}))
   {:identity {:identity-public-key identity-public-key
               :sign-fn sign-fn
               :verify-fn (or verify-fn (keys/verifier))
@@ -78,6 +84,7 @@
               :agent-version agent-version}
    :table (atom (table/create (dht-key peer-id)))
    :store (atom (store/store (or store-options {})))
+   :protocol-handlers (or protocol-handlers {})
    :connections (atom {})
    :listen-addrs (atom [])})
 
@@ -231,7 +238,10 @@
     identify/protocol
     (do (write-message port (serve/identify-response
                              (assoc (:identity node)
-                                    :listen-addrs @(:listen-addrs node))))
+                                    :listen-addrs @(:listen-addrs node)
+                                    :protocols (set/union
+                                                (set serve/supported-protocols)
+                                                (set (keys (:protocol-handlers node)))))))
         ;; Identify is one message. Saying so is part of the protocol.
         (when-let [close! (:close! port)] (close!)))
 
@@ -262,7 +272,11 @@
       ((:write! port) ((:read! port) serve/ping-size))
       (recur))
 
-    nil))
+    (when-let [handler (get (:protocol-handlers node) protocol)]
+      (handler {:protocol protocol
+                :port port
+                :peer peer
+                :peer-id (peer-id-of peer)}))))
 
 (defn- serve-connection!
   "Run one accepted connection: handshake as responder, then answer streams."
@@ -279,7 +293,9 @@
             session (connection/accept! port)]
         (remember! node (peer-id-of peer) [])
         (swap! (:connections node) assoc (peer-id-of peer) {:peer peer})
-        (serve-streams! port session (set serve/supported-protocols)
+        (serve-streams! port session
+                        (set/union (set serve/supported-protocols)
+                                   (set (keys (:protocol-handlers node))))
                                    (fn [protocol stream]
                                      (handle-stream node peer protocol stream))))
       (catch Exception _ nil)

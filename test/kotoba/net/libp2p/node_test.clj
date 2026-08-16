@@ -1,0 +1,48 @@
+(ns kotoba.net.libp2p.node-test
+  (:require [clojure.test :refer [deftest is testing]]
+            [ed25519.core :as ed]
+            [kotoba.net.libp2p.connection :as connection]
+            [kotoba.net.libp2p.dial :as dial]
+            [kotoba.net.libp2p.handshake :as handshake]
+            [kotoba.net.libp2p.keys :as keys]
+            [kotoba.net.libp2p.node :as node]
+            [multiformats.core :as mf]))
+
+(defn- seed [n]
+  (byte-array (map unchecked-byte (repeat 32 n))))
+
+(defn- test-identity [n]
+  (let [seed (seed n)
+        public-key (ed/pubkey-from-seed seed)
+        protobuf (handshake/public-key-protobuf public-key)]
+    {:identity-public-key public-key
+     :sign-fn (fn [octets]
+                (ed/sign seed (byte-array (map unchecked-byte octets))))
+     :verify-fn (keys/verifier)
+     :peer-id (handshake/peer-id mf/sha256 protobuf)}))
+
+(deftest authenticated-custom-protocol-crosses-a-real-libp2p-stream
+  (let [seen (promise)
+        protocol "/x/kotoba-test/1.0.0"
+        server-node (node/node
+                     (assoc (test-identity 11) :protocol-handlers
+                            {protocol
+                             (fn [{:keys [port peer-id]}]
+                               (deliver seen {:peer-id peer-id
+                                              :request ((:read! port) 4)})
+                               ((:write! port) [112 111 110 103])
+                               ((:close! port)))}))
+        listener (node/listen! server-node {:host "127.0.0.1" :port 0})
+        connection (dial/dial! (str "/ip4/127.0.0.1/tcp/" (:port listener))
+                               (test-identity 12))]
+    (try
+      (let [stream (connection/stream! (:secure connection)
+                                       (:session connection) protocol)]
+        ((:write! stream) [112 105 110 103])
+        (is (= [112 111 110 103] ((:read! stream) 4)))
+        (testing "the handler receives the identity authenticated by Noise"
+          (is (= (:peer-id (test-identity 12)) (:peer-id (deref seen 2000 nil))))
+          (is (= [112 105 110 103] (:request (deref seen 2000 nil))))))
+      (finally
+        ((:close! connection))
+        ((:stop! listener))))))

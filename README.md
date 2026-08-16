@@ -37,6 +37,12 @@ TCP → multistream(/noise) → Noise XX → multistream(/yamux) → Yamux
 | `store` | records (validated, deny-by-default) and providers (expiring), both bounded |
 | `validate` | concrete validators — `/ipns/` (signature, expiry, sequence) and `/pk/` |
 
+`node` also accepts a deny-by-default `:protocol-handlers` map. Only named
+protocols are advertised and negotiated; each handler receives the live stream
+plus the remote identity proven by Noise (`:peer` and derived `:peer-id`). This
+is the host boundary for higher protocols such as GraphSync: application bytes
+cannot choose the principal whose capability is evaluated.
+
 ### What is verified against the real network
 
 Measured 2026-08-04 against public IPFS peers and a local Kubo 0.41 node — the
