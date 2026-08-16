@@ -290,10 +290,10 @@
 
 (defn- serve-connection!
   "Run one accepted connection: handshake as responder, then answer streams."
-  [node ^Socket socket on-close]
+  [node ^Socket socket read-timeout-ms on-close]
   (future
     (try
-      (let [connected (socket/wrap socket)
+      (let [connected (socket/wrap socket read-timeout-ms)
             suite (dial/noise-suite)
             {:keys [port peer]} (connection/accept-handshake!
                                  (:port connected)
@@ -315,7 +315,9 @@
 
 (defn listen!
   "Start accepting connections. Returns `{:port :stop!}`."
-  [node {:keys [port host] :or {port 0 host "127.0.0.1"}}]
+  [node {:keys [port host read-timeout-ms]
+         :or {port 0 host "127.0.0.1"
+              read-timeout-ms socket/default-read-timeout-ms}}]
   (let [server (ServerSocket.)
         active (atom #{})]
     (.bind server (InetSocketAddress. ^String host ^int (int port)))
@@ -326,7 +328,8 @@
                       (while @running
                         (try (let [socket (.accept server)]
                                (swap! active conj socket)
-                               (serve-connection! node socket #(swap! active disj %)))
+                               (serve-connection! node socket read-timeout-ms
+                                                  #(swap! active disj %)))
                              (catch Exception _ nil))))]
       {:port (.getLocalPort server)
        :host host

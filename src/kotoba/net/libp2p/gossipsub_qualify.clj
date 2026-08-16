@@ -21,6 +21,9 @@
     {:identity-public-key public-key
      :sign-fn #(ed/sign seed (byte-array (map unchecked-byte %)))
      :verify-fn (keys/verifier)
+     ;; GossipSub streams are intentionally long-lived. Socket close and the
+     ;; qualification duration bound their lifetime, not idle read time.
+     :read-timeout-ms 0
      :peer-id (handshake/peer-id mf/sha256 (handshake/public-key-protobuf public-key))}))
 
 (defn- digest [data]
@@ -48,7 +51,7 @@
                                                :peer (mf/base58btc (:peer effect))}))})
         n (node/node (assoc id :protocol-handlers
                             {pubsub/gossipsub-v1-1 (host/protocol-handler router)}))
-        listener (node/listen! n {:host host :port port})
+        listener (node/listen! n {:host host :port port :read-timeout-ms 0})
         start (System/currentTimeMillis)]
     (try
       (emit! {:event :ready :node node-id :port (:port listener)
@@ -80,4 +83,9 @@
 
 (defn -main [& [config]]
   (when-not config (throw (ex-info "usage: '<edn-config>'" {})))
-  (qualify! (edn/read-string config)))
+  (try
+    (qualify! (edn/read-string config))
+    (finally
+      ;; Clojure's future executor otherwise keeps a completed qualification
+      ;; process alive after every socket has closed.
+      (shutdown-agents))))
