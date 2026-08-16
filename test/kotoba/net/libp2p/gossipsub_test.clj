@@ -7,6 +7,15 @@
   (-> (gs/add-peer state id {:outbound? outbound?})
       (assoc-in [:peers id :topics] (set topics))))
 
+(deftest adding-the-reverse-stream-preserves-peer-subscriptions
+  (let [inbound (-> (gs/init)
+                    (gs/add-peer "p" {:outbound? false :ip "203.0.113.7"})
+                    (assoc-in [:peers "p" :topics] #{topic}))
+        bidirectional (gs/add-peer inbound "p" {:outbound? true})]
+    (is (= #{topic} (get-in bidirectional [:peers "p" :topics])))
+    (is (true? (get-in bidirectional [:peers "p" :outbound?])))
+    (is (= "203.0.113.7" (get-in bidirectional [:peers "p" :ip])))))
+
 (deftest join-announces-subscription-and-grafts-a-bounded-mesh
   (let [state (-> (gs/init {:d 2 :d-low 1 :d-high 3})
                   (peer "a" [topic] true)

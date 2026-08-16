@@ -17,6 +17,7 @@
          clock #(System/currentTimeMillis)}}]
   {:router (atom (gs/init (or params {})))
    :writers (atom {})
+   :targets (atom {})
    :validator validator
    :on-deliver on-deliver
    :on-peer-subscribed on-peer-subscribed
@@ -38,7 +39,11 @@
   (doseq [effect effects]
     (case (:op effect)
       :send (when-let [writer (get @(:writers host) (:peer effect))]
-              ((:write! writer) (:rpc effect)))
+              (try ((:write! writer) (:rpc effect))
+                   (catch Exception _
+                     ((:close! writer))
+                     (swap! (:writers host) dissoc (:peer effect))
+                     (swap! (:router host) gs/remove-peer (:peer effect)))))
       :deliver ((:on-deliver host) effect)
       :peer-subscribed ((:on-peer-subscribed host) effect)
       :peer-exchange ((:on-peer-exchange host) effect)
@@ -60,11 +65,42 @@
 (defn connect!
   "Open this host's outbound stream. Returns the authenticated remote peer id."
   [host address identity options]
+  (doseq [[peer writer] @(:writers host)
+          :when (and (= address (:address writer)) (not ((:open? writer))))]
+    ((:close! writer))
+    (swap! (:writers host) dissoc peer)
+    (swap! (:router host) gs/remove-peer peer))
   (let [writer (stream/open-writer! address identity {:on-rpc #(receive-rpc! host %)})
         peer-id (node/peer-id-of (:peer writer))]
     (swap! (:writers host) assoc peer-id writer)
     (swap! (:router host) gs/add-peer peer-id (assoc options :outbound? true))
+    ;; Gossipsub's connection hello is the full current subscription snapshot,
+    ;; not only future changes. Without it a restarted peer remains invisible
+    ;; until every topic is unsubscribed and joined again.
+    (when-let [topics (seq (:subscriptions @(:router host)))]
+      ((:write! writer) {:subscriptions (mapv #(hash-map :topic % :subscribe? true) topics)}))
     peer-id))
+
+(defn add-target!
+  "Remember a peer address and keep its outbound stream recoverable."
+  [host address identity options]
+  (swap! (:targets host) assoc address {:identity identity :options options})
+  (connect! host address identity options))
+
+(defn maintain!
+  "Reconnect configured targets whose socket/reader has ended."
+  [host]
+  (mapv
+   (fn [[address {:keys [identity options]}]]
+     (let [live (some (fn [[peer writer]]
+                        (when (and (= address (:address writer)) ((:open? writer))) peer))
+                      @(:writers host))]
+       (if live
+         {:address address :peer-id live :reconnected? false}
+         (try {:address address :peer-id (connect! host address identity options)
+               :reconnected? true}
+              (catch Exception e {:address address :failed (.getMessage e)})))))
+   @(:targets host)))
 
 (defn disconnect! [host peer-id]
   (when-let [writer (get @(:writers host) peer-id)] ((:close! writer)))
@@ -87,4 +123,5 @@
 (defn close! [host]
   (doseq [[_ writer] @(:writers host)] ((:close! writer)))
   (reset! (:writers host) {})
+  (reset! (:targets host) {})
   nil)
