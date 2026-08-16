@@ -136,6 +136,15 @@ out a timeout that is indistinguishable from a hang.
 - `kotoba.net.bitswap` — want-list / have-list bookkeeping,
   want∩have intersection (`respond-to-want`), and the `WantSince` delta-sync
   request/response applied against a local commit-log (`commits-since`).
+- `kotoba.net.ipns-router` — executes the standard `ipns.pubsub` state/effect
+  core over this repo's current gossip host: validate/select/persist,
+  fan-out, and persistence Fetch request/response commands.
+
+The IPNS bridge is usable by the current Kotoba transport, but its EDN
+`:gossip` / `:ipns-fetch*` envelopes are not the libp2p GossipSub protobuf or
+libp2p Fetch wire protocol. Standard network interoperability still requires a
+host adapter for those two protocols; record bytes, topic derivation, selection,
+and persistence behavior are already shared and must not be reimplemented there.
 
 **Real I/O, on top of `kotoba-lang/wire` — `kotoba.net.transport.tcp`:**
 
