@@ -90,5 +90,7 @@
                  (catch Exception e (mux/stop! driver) ((:close! conn)) (throw e)))
         lock (Object.)]
     {:peer (:peer conn)
+     :address address
+     :open? (fn [] (not @(:connection-closed? driver)))
      :write! (fn [rpc] (locking lock (write-rpc stream rpc)))
      :close! (fn [] (mux/stop! driver) ((:close! conn)))})))
