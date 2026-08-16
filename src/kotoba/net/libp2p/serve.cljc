@@ -43,10 +43,10 @@
   prefix a string into a `bytes` field, the message parses on our side, and the
   peer reports only `error reading identify message` -- which is what go-libp2p
   said about this exact bug."
-  [{:keys [identity-public-key listen-addrs observed-addr agent-version]}]
+  [{:keys [identity-public-key listen-addrs observed-addr agent-version protocols]}]
   (pb/encode identify/schema
              (cond-> {:public-key (identity/public-key-protobuf identity-public-key)
-                      :protocols (vec supported-protocols)
+                      :protocols (vec (or protocols supported-protocols))
                       :protocol-version "ipfs/0.1.0"
                       ;; `or`, not a destructuring default: `:or` applies when a
                       ;; key is ABSENT, and a node built without an agent
