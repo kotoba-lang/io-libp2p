@@ -84,10 +84,16 @@
 
 (defn add-peer
   [state peer {:keys [outbound? explicit? ip]}]
-  (-> state
-      (assoc-in [:peers peer] {:topics #{} :outbound? (boolean outbound?)
-                               :explicit? (boolean explicit?) :ip ip})
-      (update :scores #(if (contains? % peer) % (assoc % peer {:topics {}})))))
+  (let [current (get-in state [:peers peer] {})]
+    (-> state
+      ;; Inbound and outbound GossipSub streams are negotiated independently.
+      ;; Opening the second direction must not erase subscriptions learned on
+      ;; the first one; both streams represent the same authenticated peer.
+      (assoc-in [:peers peer] {:topics (or (:topics current) #{})
+                               :outbound? (or (:outbound? current) (boolean outbound?))
+                               :explicit? (or (:explicit? current) (boolean explicit?))
+                               :ip (or ip (:ip current))})
+      (update :scores #(if (contains? % peer) % (assoc % peer {:topics {}}))))))
 
 (defn remove-peer [state peer]
   (-> state
