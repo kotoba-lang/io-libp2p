@@ -25,7 +25,7 @@
         ;; special case inside the store.
         io.github.kotoba-lang/tech-ipfs-specs-ipns
         {:git/url "https://github.com/kotoba-lang/tech-ipfs-specs-ipns.git"
-         :git/sha "ba5c9696c1d3474e52c6a3cdc4d92ed5f7985fa3"}
+         :git/sha "274ac7dd41b6f7b08dd02db8cb347f58684ad0c4"}
         io.github.kotoba-lang/org-ietf-ed25519
         {:git/url "https://github.com/kotoba-lang/org-ietf-ed25519.git"
          :git/sha "fdcefb9f1b83461fee54d04b63e374fa301ee847"}
