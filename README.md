@@ -29,10 +29,14 @@ TCP → multistream(/noise) → Noise XX → multistream(/yamux) → Yamux
 | `keys` | JVM verification for Ed25519 / RSA / ECDSA identity keys |
 | `identify` | `/ipfs/id/1.0.0`, and the one claim in it that can be checked |
 | `connection` | the driver: three stacked framings, in order, over an injected port |
+| `mux` | concurrent Yamux driver: one socket reader, independently negotiated inbound/outbound streams |
 | `socket` | TCP mechanism only — connect, read exactly n, write, close |
 | `dial` | assembly: multiaddr in, authenticated connection out |
 | `serve` | what to answer: identify snapshot, kad replies from a routing table |
 | `node` | listen, answer, remember, and look up — `kad.table` + `kad.lookup` driven over a socket |
+| `fetch` | `/libp2p/fetch/0.0.1`, protobuf + unsigned-varint framing for persistent IPNS records |
+| `pubsub` / `pubsub-stream` | full GossipSub RPC/control protobuf and long-lived unidirectional `/meshsub/1.1.0` streams |
+| `gossipsub` / `gossipsub-host` | mesh, cache, heartbeat, GRAFT/PRUNE, IHAVE/IWANT, v1.1 scoring and socket host |
 | `dnsaddr` | `/dnsaddr/…` TXT resolution, filtered to the peer id it names |
 | `store` | records (validated, deny-by-default) and providers (expiring), both bounded |
 | `validate` | concrete validators — `/ipns/` (signature, expiry, sequence) and `/pk/` |
@@ -53,6 +57,7 @@ whole stack, end to end:
 | TCP + multistream + Noise XX + identity verification | Ed25519 peer (`megaphone`) and RSA peer (`kubo/0.32.1/mars.i.ipfs.io`) |
 | Yamux stream + `/ipfs/id/1.0.0` | `kubo/0.41.0/Homebrew`, 12 protocols; identity consistent with the handshake |
 | `/ipfs/kad/1.0.0` FIND_NODE | real reply, 20 closer peers |
+| `/meshsub/1.1.0` | current `go-libp2p` reference peer subscribed, GRAFTed, and received `GO_REFERENCE_OK` over one bidirectional connection |
 
 It is now a **node**, not only a client. Measured against Kubo 0.41:
 
@@ -145,12 +150,16 @@ out a timeout that is indistinguishable from a hang.
 - `kotoba.net.ipns-router` — executes the standard `ipns.pubsub` state/effect
   core over this repo's current gossip host: validate/select/persist,
   fan-out, and persistence Fetch request/response commands.
+- `kotoba.net.ipns-standard` — executes the same state machine over standard
+  StrictNoSign GossipSub RPCs and `/libp2p/fetch/0.0.1`; validation and record
+  selection remain single-sourced in `tech-ipfs-specs-ipns`.
+- `kotoba.net.libp2p.gossipsub` — the v1.1 mesh/control/security algorithm as
+  pure state transitions, including bounded caches, extended validation,
+  backoff, outbound quota, P1–P7 scoring inputs, graylisting, and heartbeat.
 
-The IPNS bridge is usable by the current Kotoba transport, but its EDN
-`:gossip` / `:ipns-fetch*` envelopes are not the libp2p GossipSub protobuf or
-libp2p Fetch wire protocol. Standard network interoperability still requires a
-host adapter for those two protocols; record bytes, topic derivation, selection,
-and persistence behavior are already shared and must not be reimplemented there.
+The older `kotoba.net.ipns-router` EDN envelope remains as a compatibility
+adapter. New interoperable hosts use `ipns-standard`, `gossipsub-host`, and the
+Fetch protocol handler; they do not translate records through the EDN envelope.
 
 **Real I/O, on top of `kotoba-lang/wire` — `kotoba.net.transport.tcp`:**
 
@@ -162,14 +171,13 @@ and persistence behavior are already shared and must not be reimplemented there.
   dependency [`kotoba-lang/dtn`](https://github.com/kotoba-lang/dtn)'s own
   TCP transport already runs on. See "Real TCP transport" below.
 
-**Out of scope (left to a future adapter):**
+**Still out of scope:**
 
 - QUIC/WebRTC datachannel transport (`kotoba.net.transport.tcp` is plain
   TCP only — see below).
-- Noise/TLS handshake, transport-level encryption, NAT traversal, peer
-  discovery/DHT (a node's peers are configured up front; it never learns
-  about a peer it wasn't told about — the same limitation
-  `kotoba-lang/dtn`'s own direct transport has).
+- QUIC/TLS, relay/NAT traversal, and autonomous ambient peer discovery. TCP,
+  Noise XX identity binding, Yamux, Identify, Kademlia DHT, Fetch, and
+  GossipSub v1.1 are implemented here.
 - Tit-for-tat / bandwidth accounting, ledger/session bookkeeping for bitswap.
 
 The premise (see `orgs/kotoba-lang/kotoba/docs/rust-crate-migration.md`): a
@@ -185,13 +193,14 @@ browser WebRTC, native Rust/Go adapter, etc.) can drive. See
 | | |
 |---|---|
 | Role | capability |
-| Tests | 56 assertions, all green (`clojure -M:test`, pure `.cljc` only) |
+| Tests | 68 tests / 201 assertions, all green (`clojure -M:test`) |
 | Real TCP transport (`kotoba.net.transport.tcp`) | yes — plain TCP via nbb, built on `kotoba-lang/wire`; E2E demo green (3/3 scenarios), see below |
 | Gossip fanout + dedup over real sockets | yes — real multi-node mesh delivery, seen-cache dedup proven to suppress redundant re-delivery across real OS processes |
 | Bitswap want/have over real sockets | yes — real request/response round-trip, matches pure `respond-to-want` |
 | Bitswap delta-sync over real sockets | yes — real request/response round-trip, matches pure `commits-since` |
-| Peer discovery / DHT | no (peers configured up front only — see Scope) |
-| NAT traversal / QUIC / Noise | no (plain TCP, cleartext, unauthenticated at the transport level — see Scope) |
+| IPNS Fetch + GossipSub standard wire | yes — real TCP/Noise/Yamux; current go-libp2p reference delivery verified |
+| Peer discovery / DHT | Kademlia query/serve yes; autonomous ambient discovery is still host-configured |
+| NAT traversal / QUIC | no — direct TCP multiaddrs only |
 
 ## Usage
 

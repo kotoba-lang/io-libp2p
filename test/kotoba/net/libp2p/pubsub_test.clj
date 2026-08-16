@@ -22,3 +22,16 @@
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo #"not-strict-no-sign"
          (pubsub/decode-rpc [18 9 10 1 9 18 1 1 34 1 120])))))
+
+(deftest gossipsub-v1-1-control-plane-round-trips
+  (let [control {:ihave [{:topic "/record/x" :message-ids [[1 2] [3 4]]}]
+                 :iwant [{:message-ids [[5 6]]}]
+                 :graft [{:topic "/record/x"}]
+                 :prune [{:topic "/record/y"
+                          :peers [{:peer-id [7 8] :signed-peer-record [9]}]
+                          :backoff-seconds 60}]
+                 :idontwant [{:message-ids [[10 11]]}]}
+        decoded (pubsub/decode-rpc (pubsub/encode-rpc {:control control}))]
+    (is (= control (:control decoded)))
+    (is (= [] (:subscriptions decoded)))
+    (is (= [] (:messages decoded)))))
