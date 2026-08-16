@@ -290,7 +290,7 @@
 
 (defn- serve-connection!
   "Run one accepted connection: handshake as responder, then answer streams."
-  [node ^Socket socket]
+  [node ^Socket socket on-close]
   (future
     (try
       (let [connected (socket/wrap socket)
@@ -309,25 +309,36 @@
                                    (fn [protocol stream]
                                      (handle-stream node peer protocol stream))))
       (catch Exception _ nil)
-      (finally (try (.close socket) (catch Exception _ nil))))))
+      (finally
+        (try (.close socket) (catch Exception _ nil))
+        (on-close socket)))))
 
 (defn listen!
   "Start accepting connections. Returns `{:port :stop!}`."
   [node {:keys [port host] :or {port 0 host "127.0.0.1"}}]
-  (let [server (ServerSocket.)]
+  (let [server (ServerSocket.)
+        active (atom #{})]
     (.bind server (InetSocketAddress. ^String host ^int (int port)))
     (reset! (:listen-addrs node)
             [(str "/ip4/" host "/tcp/" (.getLocalPort server))])
     (let [running (atom true)
           accepting (future
                       (while @running
-                        (try (serve-connection! node (.accept server))
+                        (try (let [socket (.accept server)]
+                               (swap! active conj socket)
+                               (serve-connection! node socket #(swap! active disj %)))
                              (catch Exception _ nil))))]
       {:port (.getLocalPort server)
        :host host
        :stop! (fn []
                 (reset! running false)
                 (try (.close server) (catch Exception _ nil))
+                ;; Closing only the accept socket leaves every authenticated
+                ;; stream alive. Qualification exposed this as a node that had
+                ;; announced completion but kept receiving publications.
+                (doseq [^Socket socket @active]
+                  (try (.close socket) (catch Exception _ nil)))
+                (reset! active #{})
                 (future-cancel accepting))})))
 
 ;; ---------------------------------------------------------------------------

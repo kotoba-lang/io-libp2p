@@ -56,3 +56,23 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"peer-id-mismatch"
                             (dial/dial! address (test-identity 73))))
       (finally ((:stop! listener))))))
+
+(deftest stopping-a-listener-closes-existing-authenticated-connections
+  (let [entered (promise)
+        protocol "/x/shutdown/1.0.0"
+        server (node/node
+                (assoc (test-identity 74) :protocol-handlers
+                       {protocol (fn [{:keys [port]}]
+                                   (deliver entered true)
+                                   ((:read! port) 1))}))
+        listener (node/listen! server {:host "127.0.0.1" :port 0})
+        conn (dial/dial! (str "/ip4/127.0.0.1/tcp/" (:port listener))
+                         (test-identity 75))
+        stream (connection/stream! (:secure conn) (:session conn) protocol)]
+    (try
+      (is (true? (deref entered 2000 false)))
+      ((:stop! listener))
+      (is (instance? Exception
+                     (deref (future (try ((:read! stream) 1)
+                                         (catch Exception e e))) 2000 nil)))
+      (finally ((:close! conn))))))
