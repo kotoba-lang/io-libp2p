@@ -46,3 +46,13 @@
       (finally
         ((:close! connection))
         ((:stop! listener))))))
+
+(deftest multiaddr-peer-id-is-checked-against-the-noise-identity
+  (let [server (node/node (test-identity 71))
+        listener (node/listen! server {:host "127.0.0.1" :port 0})
+        wrong (mf/base58btc (:peer-id (test-identity 72)))
+        address (str "/ip4/127.0.0.1/tcp/" (:port listener) "/p2p/" wrong)]
+    (try
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"peer-id-mismatch"
+                            (dial/dial! address (test-identity 73))))
+      (finally ((:stop! listener))))))

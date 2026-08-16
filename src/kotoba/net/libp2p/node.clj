@@ -179,11 +179,14 @@
   the peer may open a stream at any moment, including while we are waiting for
   a reply on one of ours."
   [secure session supported handle]
-  (let [inboxes (volatile! {})]
+  (let [inboxes (volatile! {})
+        closed (volatile! #{})
+        connection-closed? (volatile! false)]
     (loop []
       (let [frame (try (connection/read-yamux-frame secure)
                        (catch Exception _ nil))]
-        (when frame
+        (if-not frame
+          (vreset! connection-closed? true)
           (let [id (:stream-id frame)
                 flags (:flags frame)]
             (cond
@@ -202,6 +205,10 @@
                 (let [port {:read! (fn [n]
                                      (loop []
                                        (when (< (count (get @inboxes id)) n)
+                                         (when (or @connection-closed? (contains? @closed id))
+                                           (fail! :stream/closed-early
+                                                  {:stream-id id :wanted n
+                                                   :available (count (get @inboxes id))}))
                                          (Thread/sleep 2)
                                          (recur)))
                                      (let [taken (vec (take n (get @inboxes id)))]
@@ -225,8 +232,11 @@
                       (catch Exception _ nil)))))
 
               (= :data (:type frame))
-              (when (contains? @inboxes id)
-                (vswap! inboxes update id into (:payload frame)))
+              (do
+                (when (contains? @inboxes id)
+                  (vswap! inboxes update id into (:payload frame)))
+                (when (or (contains? flags :fin) (contains? flags :rst))
+                  (vswap! closed conj id)))
 
               :else nil)
             (recur)))))))

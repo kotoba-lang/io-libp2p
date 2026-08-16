@@ -10,8 +10,10 @@
   (it is the peer id), and the Noise primitives come from a provider, so this
   namespace holds no keys and no algorithms."
   (:require [kotoba.net.libp2p.connection :as connection]
+            [kotoba.net.libp2p.handshake :as handshake]
             [kotoba.net.libp2p.identify :as identify]
             [kotoba.net.libp2p.socket :as socket]
+            [multiformats.core :as mf]
             [noise.provider.jvm :as provider]
             [noise.suite :as suite]))
 
@@ -57,7 +59,15 @@
                                   :identity-public-key identity-public-key
                                   :sign-fn sign-fn
                                   :verify-fn verify-fn})
-            session (connection/open! port)]
+            session (connection/open! port)
+            actual-peer-id (handshake/peer-id mf/sha256 (:identity-key-protobuf peer))
+            expected-peer-id (some->> (:peer-id target) mf/base58btc-decode
+                                      (mapv #(bit-and % 0xff)))
+            actual-peer-id (mapv #(bit-and % 0xff) actual-peer-id)]
+        (when (and expected-peer-id (not= actual-peer-id expected-peer-id))
+          (fail! :dial/peer-id-mismatch
+                 {:expected (:peer-id target)
+                  :actual (mf/base58btc actual-peer-id)}))
         {:peer peer
          :expected-peer-id (:peer-id target)
          :address address
