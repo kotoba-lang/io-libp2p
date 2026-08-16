@@ -112,10 +112,13 @@ answer GET_PROVIDERS without naming itself. `republish!` re-announces only what
 *we* provide; provider records expire, so announcing once means being advertised
 until the TTL and then silently not. The interval belongs to the caller.
 
-**Transports**: TCP only. QUIC would need a QUIC stack, and libp2p TLS a
-certificate carrying the libp2p extension — neither exists here and neither is
-a small addition. mplex is not implemented; yamux is what every current peer
-negotiates.
+**Transports**: TCP/Noise/Yamux is the built-in JVM socket backend. Native QUIC,
+WebTransport, and WebRTC engines remain host dependencies, but
+`kotoba.net.libp2p.transport` now supplies their bounded selection boundary:
+each backend returns its native muxed connection and must attest the
+authenticated remote PeerId. `kotoba.net.libp2p.dcutr` supplies the standard
+CONNECT/CONNECT/SYNC protobuf exchange over a relay stream, with the 4 KiB
+message ceiling and three-candidate direct-dial ceiling enforced locally.
 
 ### The two bugs that cost the most, and how they presented
 
@@ -173,11 +176,10 @@ Fetch protocol handler; they do not translate records through the EDN envelope.
 
 **Still out of scope:**
 
-- QUIC/WebRTC datachannel transport (`kotoba.net.transport.tcp` is plain
-  TCP only — see below).
-- QUIC/TLS, relay/NAT traversal, and autonomous ambient peer discovery. TCP,
-  Noise XX identity binding, Yamux, Identify, Kademlia DHT, Fetch, and
-  GossipSub v1.1 are implemented here.
+- Concrete native QUIC/TLS, WebTransport, WebRTC datachannel, and Circuit
+  Relay v2 engines. Their registered connection contract and DCUtR direct
+  upgrade are implemented; deployment still has to inject and qualify each
+  engine. Autonomous ambient peer discovery is likewise a deployment concern.
 - Tit-for-tat / bandwidth accounting, ledger/session bookkeeping for bitswap.
 
 The premise (see `orgs/kotoba-lang/kotoba/docs/rust-crate-migration.md`): a
