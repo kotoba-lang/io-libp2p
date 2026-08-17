@@ -15,7 +15,7 @@
          :git/sha "8eccaff35e1c6e5dec64fb81a9d62c7618e4b018"}
         io.github.kotoba-lang/dev-protobuf
         {:git/url "https://github.com/kotoba-lang/dev-protobuf.git"
-         :git/sha "fe67052627a70f3e406fab2f8dc475ea304be94c"}
+         :git/sha "3f20b1e1cdbe89750d8afaf24f64777a2f170c3c"}
         ;; Ed25519 for the identity key the peer id is derived from. Injected
         ;; into the driver rather than required by it -- the driver holds no
         ;; keys -- but the tests and CLI need a concrete signer.
