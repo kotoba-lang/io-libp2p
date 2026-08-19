@@ -150,6 +150,22 @@
 ;; ---------------------------------------------------------------------------
 ;; Validators
 
+(def ^:private pk-prefix
+  "`/pk/` as bytes.
+
+  Not `(mapv int \"/pk/\")`: iterating a string gives Characters on the JVM and
+  one-character strings in ClojureScript, where `(int \"/\")` is 0. Measured
+  2026-08-19 under nbb, that made this validator do both wrong things at once
+  -- a real `/pk/` record was rejected, and any key whose first four bytes were
+  zero was accepted as a public-key record and checked against the hash. This
+  namespace's own docstring says a node that accepts records it cannot check
+  \"becomes a confident source of whatever it was handed\"; on that runtime it
+  was one.
+
+  The tests here are `.clj`, which is why nobody saw it. `png.encode` and
+  `kotoba.render.splat-loader` were the same bug on the same day."
+  (mapv #?(:clj int :cljs #(.charCodeAt % 0)) "/pk/"))
+
 (defn public-key-validator
   "`/pk/<multihash>` -> the key must hash to the multihash in its own key.
 
@@ -158,7 +174,7 @@
   [hash-fn]
   (fn [key value]
     (let [k (vec key)
-          prefix (mapv int "/pk/")]
+          prefix pk-prefix]
       (and (= prefix (vec (take 4 k)))
            (= (vec (drop 4 k)) (vec (hash-fn (vec value))))))))
 
