@@ -1,7 +1,7 @@
 (ns kotoba.net.libp2p.serve-test
   "Answering: what a node replies, and the wire-shape mistake that made both
   of its replies unreadable."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is]]
             [ed25519.core :as ed]
             [kad.message :as kad]
