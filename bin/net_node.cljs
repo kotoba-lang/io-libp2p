@@ -22,7 +22,7 @@
 ;; kotoba.wire.tcp) is built on kotoba.bytes.
 
 (ns net-node
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [nbb.core :refer [*file* invoked-file]]
             [kotoba.net.transport.tcp :as tcp]))
 
