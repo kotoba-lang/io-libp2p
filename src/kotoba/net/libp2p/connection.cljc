@@ -26,7 +26,7 @@
   for the same reason the layers below hold no socket: a driver that opened its
   own connection could not be tested without a network, and this one is tested
   against an in-memory pair."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [kotoba.net.libp2p.handshake :as identity]
             [libp2p.multistream :as ms]
             [libp2p.yamux :as yamux]

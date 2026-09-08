@@ -5,7 +5,7 @@
   multiplexing; they must return a connection, not be disguised as the raw
   byte port consumed by TCP/Noise/Yamux. Backends are injected by the host and
   must attest the authenticated remote PeerId."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (def kinds #{:tcp :quic-v1 :webtransport :webrtc-direct :webrtc :relay})
 

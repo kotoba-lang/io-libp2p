@@ -11,7 +11,7 @@
   first record because it parsed is how a dialer ends up authenticating a peer
   it did not mean to reach -- which would then verify correctly and be the
   wrong node."
-  (:require [clojure.string :as str])
+  (:require [kotoba.lang.text :as str])
   (:import [javax.naming.directory InitialDirContext]
            [java.util Hashtable]))
 
