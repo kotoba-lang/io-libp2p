@@ -30,7 +30,7 @@
 (ns kotoba.net.transport.tcp-demo
   (:require ["node:child_process" :as cp]
             ["node:net" :as net]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [promesa.core :as p]
             [kotoba.net.bitswap :as bitswap]
             [kotoba.net.transport.tcp :as tcp]))
