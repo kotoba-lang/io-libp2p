@@ -56,7 +56,7 @@ policy.
 
 - Correctness of dedup/fanout/want-have/delta-sync logic is fully unit
   testable without any network, exactly as required by this repo's tests
-  (`test/kotoba/net/gossip_test.clj`, `test/kotoba/net/bitswap_test.clj`).
+  (`test/kotoba/net/gossip_test.cljk`, `test/kotoba/net/bitswap_test.cljk`).
 - Anyone building a transport adapter (JVM, browser, native) implements
   *against* this contract rather than re-deriving the semantics themselves.
 - No manifest registration is performed by this ADR/commit; `kotoba-net` is
