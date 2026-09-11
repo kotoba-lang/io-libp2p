@@ -3,7 +3,7 @@
 ;; gossip/bitswap protocol messages between real peers over real TCP
 ;; sockets, built on kotoba-lang/wire. Run from this repo's root:
 ;;
-;;   nbb --classpath "src:test:../wire/src:../bytes/src" \
+;;   kbb --backend sci --classpath "src:test:../wire/src:../bytes/src" \
 ;;     test/kotoba/net/transport/tcp_demo.cljk
 ;;
 ;; (relative --classpath entries mean this must run with cwd at this

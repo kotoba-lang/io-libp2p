@@ -13,7 +13,7 @@
 
   .cljs, NOT .cljc: real `node:net` socket I/O (via kotoba.wire.tcp), so
   this only runs under a Node-hosted ClojureScript runtime (nbb in this
-  repo). The JVM `clojure -M:test` suite never loads `.cljs` files, so
+  repo). The JVM `kbb -M:test` suite never loads `.cljs` files, so
   this namespace can never regress kotoba-net's existing pure `.cljc`
   test suite (see README.md for the current assertion count).
 
@@ -82,7 +82,7 @@
   crypto under nbb' pattern kotoba-lang/dtn's kotoba.dtn.auth already
   established for its own HMAC-SHA256) that supplies exactly the two
   methods gossip.cljc's content-hash calls, verified byte-for-byte against
-  known SHA-256 test vectors. `clojure -M:test` and a shadow-cljs build
+  known SHA-256 test vectors. `kbb -M:test` and a shadow-cljs build
   are both unaffected -- this shim is never on either of those classpaths.
 
   A SECOND GAP THIS NAMESPACE USED TO WORK AROUND HAS SINCE BEEN FIXED AT

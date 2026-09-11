@@ -1,5 +1,5 @@
-#!/usr/bin/env nbb
-;; nbb --classpath src:test run-tests.cljk   (from the repository root)
+#!/usr/bin/env kbb
+;; kbb --backend sci --classpath src:test run-tests.cljk   (from the repository root)
 ;;
 ;; The ClojureScript side. Only the namespaces that have been checked to run
 ;; here: `kotoba.net.libp2p.store` needs nothing but itself, while the rest of
