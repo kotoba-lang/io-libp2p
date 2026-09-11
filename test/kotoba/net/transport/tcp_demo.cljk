@@ -4,13 +4,13 @@
 ;; sockets, built on kotoba-lang/wire. Run from this repo's root:
 ;;
 ;;   nbb --classpath "src:test:../wire/src:../bytes/src" \
-;;     test/kotoba/net/transport/tcp_demo.cljs
+;;     test/kotoba/net/transport/tcp_demo.cljk
 ;;
 ;; (relative --classpath entries mean this must run with cwd at this
 ;; repo's root, with kotoba-lang/wire and kotoba-lang/bytes checked out as
 ;; siblings -- same layout deps.edn assumes. Scenario 1 also `spawn`s two
 ;; real, separate `nbb` OS processes, found via $PATH, running
-;; bin/net_node.cljs with the same --classpath.)
+;; bin/net_node.cljk with the same --classpath.)
 ;;
 ;; Scenario 1 proves real multi-node gossip fanout AND dedup together, in
 ;; a genuinely non-trivial (3-node, fully-meshed, not just A->B) topology,
@@ -64,14 +64,14 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- spawn-listen-node!
-  "Spawn a real, separate `nbb` OS process running bin/net_node.cljs
+  "Spawn a real, separate `nbb` OS process running bin/net_node.cljk
   listen for node-id/port/peer-strs, capturing its stdout/stderr into
   atoms this process can inspect later. Returns {:child ... :out-chunks
   ... :err-chunks ...}."
   [node-id port peer-strs]
   (let [out-chunks (atom [])
         err-chunks (atom [])
-        args (into ["--classpath" classpath "bin/net_node.cljs" "listen"
+        args (into ["--classpath" classpath "bin/net_node.cljk" "listen"
                     "--node-id" node-id "--port" (str port)]
                    (mapcat (fn [p] ["--peer" p]) peer-strs))
         child (cp/spawn "nbb" (into-array args) #js {:cwd (js/process.cwd)})]

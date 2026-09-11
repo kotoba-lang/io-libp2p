@@ -1,4 +1,4 @@
-{;; nbb bundles promesa.core (see test/kotoba/net/transport/tcp_demo.cljs)
+{;; nbb bundles promesa.core (see test/kotoba/net/transport/tcp_demo.cljk)
  ;; but this repo does not declare it as an mvn dependency, so clj-kondo
  ;; can't analyze its macros from source. p/let expands like
  ;; clojure.core/let (sequential bindings, body); tell clj-kondo so it

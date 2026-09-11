@@ -48,7 +48,7 @@
   request-response over a real socket round-trip (`want!`); bitswap
   delta-sync request-response over a real socket round-trip
   (`request-commits-since!`). Every one of these is provable end-to-end
-  in `test/kotoba/net/transport/tcp_demo.cljs` (real sockets between real
+  in `test/kotoba/net/transport/tcp_demo.cljk` (real sockets between real
   node handles, at least one scenario across real separate OS processes).
 
   WHAT STAYS OUT OF SCOPE (same as kotoba-net's own founding README, and
@@ -77,7 +77,7 @@
   top-of-file comment documents it was written against) but NOT bundled by
   nbb (confirmed against a real nbb 1.4.210 install: it ships
   goog.string/goog.crypt shims but no Sha256). See
-  `src/goog/crypt/Sha256.cljs` in this repo -- an nbb-classpath-only shim
+  `src/goog/crypt/Sha256.cljk` in this repo -- an nbb-classpath-only shim
   (Node's built-in `node:crypto`, the same 'no npm dep, use Node core
   crypto under nbb' pattern kotoba-lang/dtn's kotoba.dtn.auth already
   established for its own HMAC-SHA256) that supplies exactly the two

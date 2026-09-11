@@ -2,12 +2,12 @@
 ;; production daemon (mirrors kotoba-lang/dtn's bin/dtn_node.cljs). No
 ;; config file, no auth, no encryption: it binds a plain TCP socket on the
 ;; given port and gossips with whatever :peer addresses are passed on the
-;; command line. Used by test/kotoba/net/transport/tcp_demo.cljs to spawn
+;; command line. Used by test/kotoba/net/transport/tcp_demo.cljk to spawn
 ;; real, separate `nbb` OS processes for its strongest cross-process
 ;; delivery scenario -- not just in-process node handles.
 ;;
 ;; Usage:
-;;   nbb --classpath "src:../wire/src:../bytes/src" bin/net_node.cljs \
+;;   nbb --classpath "src:../wire/src:../bytes/src" bin/net_node.cljk \
 ;;     listen --node-id b --port 5301 \
 ;;     --peer a:127.0.0.1:5300:topic-a --peer c:127.0.0.1:5302:topic-a
 ;;   ;; -> starts a long-running gossip node; logs every fresh gossip

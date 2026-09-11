@@ -166,7 +166,7 @@ Fetch protocol handler; they do not translate records through the EDN envelope.
 
 **Real I/O, on top of `kotoba-lang/wire` — `kotoba.net.transport.tcp`:**
 
-- A plain-TCP "gossip node" (`src/kotoba/net/transport/tcp.cljs`,
+- A plain-TCP "gossip node" (`src/kotoba/net/transport/tcp.cljk`,
   Node-only/nbb) that actually moves the `:kotoba.net.gossip`/
   `:kotoba.net.bitswap` protocol messages above between real peers over
   real sockets, delegating all framing/socket-pool mechanics to
@@ -233,7 +233,7 @@ browser WebRTC, native Rust/Go adapter, etc.) can drive. See
 ## Real TCP transport (`kotoba.net.transport.tcp`)
 
 Everything above is intentionally I/O-free. `kotoba.net.transport.tcp`
-(`src/kotoba/net/transport/tcp.cljs`) is the real network-I/O adapter this
+(`src/kotoba/net/transport/tcp.cljk`) is the real network-I/O adapter this
 repo's own founding scope explicitly deferred: a "gossip node" that
 actually moves `kotoba.net.gossip`/`kotoba.net.bitswap` protocol messages
 between real peers over real TCP sockets. It's `.cljs`, not `.cljc` — it
@@ -284,7 +284,7 @@ entirely from `kotoba.net.transport.tcp` instead):
 1. `content-hash`'s `:cljs` branch calls a real Google Closure Library
    class (`goog.crypt.Sha256`) that a full Closure-Compiler build
    (shadow-cljs) provides for free but plain `nbb` does not bundle.
-   `src/goog/crypt/Sha256.cljs` is an nbb-classpath-only shim (Node's
+   `src/goog/crypt/Sha256.cljk` is an nbb-classpath-only shim (Node's
    built-in `node:crypto`, no npm dependency — the same pattern
    `kotoba-lang/dtn`'s `kotoba.dtn.auth` already uses for its own
    HMAC-SHA256 under nbb) that supplies exactly the two methods
@@ -305,13 +305,13 @@ throwing, so `kotoba.net.transport.tcp` no longer needs to route around it
 directly (the `safe-from` workaround that used to live in the namespace
 source has been removed).
 
-### E2E demo (`test/kotoba/net/transport/tcp_demo.cljs`)
+### E2E demo (`test/kotoba/net/transport/tcp_demo.cljk`)
 
 An executable proof, not a unit test — run it and read the output:
 
 ```bash
 nbb --classpath "src:test:../wire/src:../bytes/src" \
-  test/kotoba/net/transport/tcp_demo.cljs
+  test/kotoba/net/transport/tcp_demo.cljk
 ```
 
 (`--classpath` mirrors `deps.edn`'s sibling `:local/root` layout — this
@@ -323,7 +323,7 @@ Three scenarios, printing `PASS`/`FAIL` per scenario and a final
 1. **3-node gossip fanout + dedup, real TCP.** Node A (in-process) knows
    B and C; B and C also know each other (a full mesh, not just A→B) and
    both are spawned as real, separate `nbb` OS processes via
-   `bin/net_node.cljs listen` — mirroring `kotoba-lang/dtn`'s own
+   `bin/net_node.cljk listen` — mirroring `kotoba-lang/dtn`'s own
    strongest-form scenario 1 (spawn a real child process, verify via its
    own stdout, not just a local return value). A `publish!`s one message;
    the demo confirms both B and C actually receive it (grepping each
@@ -346,13 +346,13 @@ Three scenarios, printing `PASS`/`FAIL` per scenario and a final
    confirms B's real `:bitswap-commits` response is exactly what pure
    `bitswap/commits-since` would compute.
 
-### CLI (`bin/net_node.cljs`)
+### CLI (`bin/net_node.cljk`)
 
 A minimal demo/dev tool — no config file, no auth, no encryption — used by
 the E2E demo above to spawn real listening nodes as separate OS processes:
 
 ```bash
-nbb --classpath "src:../wire/src:../bytes/src" bin/net_node.cljs listen \
+nbb --classpath "src:../wire/src:../bytes/src" bin/net_node.cljk listen \
   --node-id b --port 5301 \
   --peer a:127.0.0.1:5300:topic-a --peer c:127.0.0.1:5302:topic-a
 ```
