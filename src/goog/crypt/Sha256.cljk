@@ -19,7 +19,7 @@
 ;; environment gap between gossip.cljc's original cljs target and nbb,
 ;; not a bug in gossip.cljc's own logic -- see this repo's
 ;; kotoba.net.transport.tcp namespace docstring and README for the full
-;; writeup, and clojure -M:test / a shadow-cljs build are both completely
+;; writeup, and kbb -M:test / a shadow-cljs build are both completely
 ;; unaffected (this file is never on either of those classpaths).
 ;;
 ;; FIX, WITHOUT TOUCHING gossip.cljc: nbb resolves an unrecognized
@@ -34,7 +34,7 @@
 ;; HMAC-SHA256 -- Node's built-in `node:crypto` module, no npm dependency
 ;; -- satisfies gossip.cljc's require with zero edits to gossip.cljc
 ;; itself. Any consumer of kotoba-net (this repo's own tests/demo, or a
-;; future caller) that puts `src` on its nbb --classpath automatically
+;; future caller) that puts `src` on its kbb --backend sci --classpath automatically
 ;; picks this up, the same way it already picks up
 ;; kotoba.net.gossip/kotoba.net.bitswap from that same `src` root.
 ;;

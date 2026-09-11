@@ -4,7 +4,7 @@
    wire-message envelope construction/shape, peer-id -> host:port
    resolution, and folding a node's configured :peers into a fresh
    kotoba.net.gossip peer-state. None of this needs a real socket, so it
-   stays portable .cljc and testable under plain JVM `clojure -M:test`,
+   stays portable .cljc and testable under plain JVM `kbb -M:test`,
    same split kotoba-lang/dtn's transport uses between its pure `.cljc`
    data-model namespaces and its impure `.cljs` socket-I/O namespace.
 

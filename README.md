@@ -195,7 +195,7 @@ browser WebRTC, native Rust/Go adapter, etc.) can drive. See
 | | |
 |---|---|
 | Role | capability |
-| Tests | 68 tests / 201 assertions, all green (`clojure -M:test`) |
+| Tests | 68 tests / 201 assertions, all green (`kbb -M:test`) |
 | Real TCP transport (`kotoba.net.transport.tcp`) | yes — plain TCP via nbb, built on `kotoba-lang/wire`; E2E demo green (3/3 scenarios), see below |
 | Gossip fanout + dedup over real sockets | yes — real multi-node mesh delivery, seen-cache dedup proven to suppress redundant re-delivery across real OS processes |
 | Bitswap want/have over real sockets | yes — real request/response round-trip, matches pure `respond-to-want` |
@@ -239,7 +239,7 @@ actually moves `kotoba.net.gossip`/`kotoba.net.bitswap` protocol messages
 between real peers over real TCP sockets. It's `.cljs`, not `.cljc` — it
 only runs under a Node-hosted ClojureScript runtime
 ([`nbb`](https://github.com/babashka/nbb) in this repo) and is never
-loaded by the JVM `clojure -M:test` suite, so it cannot regress the 56
+loaded by the JVM `kbb -M:test` suite, so it cannot regress the 56
 pure-data assertions above.
 
 **Wire framing and socket-pool plumbing come from
@@ -289,13 +289,13 @@ entirely from `kotoba.net.transport.tcp` instead):
    `kotoba-lang/dtn`'s `kotoba.dtn.auth` already uses for its own
    HMAC-SHA256 under nbb) that supplies exactly the two methods
    `content-hash` calls, verified against known SHA-256 test vectors.
-   `clojure -M:test` and a shadow-cljs build are unaffected — this shim is
+   `kbb -M:test` and a shadow-cljs build are unaffected — this shim is
    never on either of those classpaths.
 
 A second gap that used to live here has since been **fixed at the source**:
 `route-message` used to build its exclude set via the literal `#{from
 self}` syntax, which threw `Duplicate key` (real Clojure/ClojureScript/SCI
-behavior, reproduced identically under plain JVM `clojure -M -e`, not an
+behavior, reproduced identically under plain JVM `kbb -M -e`, not an
 nbb-only quirk) whenever `:from` and `:self` evaluated to the same value —
 exactly what a locally-originated `publish!` naturally produces (there's no
 previous hop to exclude, only self). `route-message` now builds that set
@@ -310,7 +310,7 @@ source has been removed).
 An executable proof, not a unit test — run it and read the output:
 
 ```bash
-nbb --classpath "src:test:../wire/src:../bytes/src" \
+kbb --backend sci --classpath "src:test:../wire/src:../bytes/src" \
   test/kotoba/net/transport/tcp_demo.cljk
 ```
 
@@ -352,7 +352,7 @@ A minimal demo/dev tool — no config file, no auth, no encryption — used by
 the E2E demo above to spawn real listening nodes as separate OS processes:
 
 ```bash
-nbb --classpath "src:../wire/src:../bytes/src" bin/net_node.cljk listen \
+kbb --backend sci --classpath "src:../wire/src:../bytes/src" bin/net_node.cljk listen \
   --node-id b --port 5301 \
   --peer a:127.0.0.1:5300:topic-a --peer c:127.0.0.1:5302:topic-a
 ```
@@ -360,9 +360,9 @@ nbb --classpath "src:../wire/src:../bytes/src" bin/net_node.cljk listen \
 ## Test
 
 ```bash
-clojure -M:test    # pure .cljc — kotoba.net.gossip, kotoba.net.bitswap,
+kbb -M:test    # pure .cljc — kotoba.net.gossip, kotoba.net.bitswap,
                     # kotoba.net.transport.envelope
-clojure -M:lint     # clj-kondo, 0 errors
+kbb -M:lint     # clj-kondo, 0 errors
 ```
 
 `kotoba.net.transport.tcp` (real socket I/O) is `.cljs`-only and is
@@ -370,7 +370,7 @@ exercised by the E2E demo above rather than having its own JVM-runnable
 test suite — the same split `kotoba-lang/dtn`'s transport uses. Its
 peer-id-resolution and envelope-construction logic is pure enough to
 factor out (`kotoba.net.transport.envelope`) and IS covered by
-`clojure -M:test`.
+`kbb -M:test`.
 
 ## License
 
