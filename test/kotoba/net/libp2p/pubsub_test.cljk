@@ -1,5 +1,5 @@
 (ns kotoba.net.libp2p.pubsub-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.net.libp2p.pubsub :as pubsub]))
 
 (deftest standard-rpc-protobuf-fixtures

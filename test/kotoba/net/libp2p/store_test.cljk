@@ -1,6 +1,6 @@
 (ns kotoba.net.libp2p.store-test
   "What a node agrees to keep for other people."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.net.libp2p.handshake :as handshake]
             [kotoba.net.libp2p.store :as store]
             [multiformats.core :as mf]))

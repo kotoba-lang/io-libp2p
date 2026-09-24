@@ -1,5 +1,5 @@
 (ns kotoba.net.ipns-router-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [ipns.record :as record]
             [kotoba.net.gossip :as gossip]
             [kotoba.net.ipns-router :as host]))

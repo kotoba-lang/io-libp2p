@@ -1,5 +1,5 @@
 (ns kotoba.net.libp2p.dcutr-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.net.libp2p.dcutr :as dcutr]
             [kotoba.net.libp2p.socket :as socket]))
 

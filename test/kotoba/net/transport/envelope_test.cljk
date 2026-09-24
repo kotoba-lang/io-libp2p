@@ -1,5 +1,5 @@
 (ns kotoba.net.transport.envelope-test
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [kotoba.test :refer [deftest testing is]]
             [kotoba.net.gossip :as gossip]
             [kotoba.net.transport.envelope :as envelope]))
 

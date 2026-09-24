@@ -1,6 +1,6 @@
 (ns kotoba.net.libp2p.validate-test
   "The `/ipns/` rule, including the two parts that are easy to skip."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [ed25519.core :as ed]
             [ipns.core :as ipns-core]
             [ipns.record :as ipns]

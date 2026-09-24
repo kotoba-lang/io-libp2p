@@ -2,7 +2,7 @@
   "Answering: what a node replies, and the wire-shape mistake that made both
   of its replies unreadable."
   (:require [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is]]
+            [kotoba.test :refer [deftest is]]
             [ed25519.core :as ed]
             [kad.message :as kad]
             [kotoba.net.libp2p.dnsaddr :as dnsaddr]

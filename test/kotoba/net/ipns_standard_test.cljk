@@ -1,5 +1,5 @@
 (ns kotoba.net.ipns-standard-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [ed25519.core :as ed]
             [ipns.pubsub :as ipns]
             [ipns.record :as record]

@@ -1,7 +1,7 @@
 (ns kotoba.net.libp2p.connection-test
   "The muxer loop, and the framing mistake that made a connection look like a
   peer problem."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.net.libp2p.connection :as connection]
             [libp2p.yamux :as yamux]))
 
