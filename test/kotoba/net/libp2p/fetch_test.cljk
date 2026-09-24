@@ -1,5 +1,5 @@
 (ns kotoba.net.libp2p.fetch-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [ed25519.core :as ed]
             [kotoba.net.libp2p.fetch :as fetch]
             [kotoba.net.libp2p.handshake :as handshake]

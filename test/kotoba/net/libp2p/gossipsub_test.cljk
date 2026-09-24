@@ -1,5 +1,5 @@
 (ns kotoba.net.libp2p.gossipsub-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [kotoba.net.libp2p.gossipsub :as gs]))
 
 (def topic "/record/a")

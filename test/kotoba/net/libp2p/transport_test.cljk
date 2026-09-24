@@ -1,5 +1,5 @@
 (ns kotoba.net.libp2p.transport-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.net.libp2p.transport :as transport]))
 
 (deftest address-kind-is-most-specific

@@ -1,6 +1,6 @@
 (ns kotoba.net.libp2p.handshake-test
   "libp2p's identity binding — the part that makes a peer id mean anything."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [ed25519.core :as ed]
             [kotoba.net.libp2p.handshake :as handshake]
             [kotoba.net.libp2p.identify :as identify]

@@ -1,5 +1,5 @@
 (ns kotoba.net.bitswap-test
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [kotoba.test :refer [deftest testing is]]
             [kotoba.net.bitswap :as bitswap]))
 
 (deftest want-have-list-test

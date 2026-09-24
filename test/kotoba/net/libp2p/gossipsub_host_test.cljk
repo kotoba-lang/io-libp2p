@@ -1,5 +1,5 @@
 (ns kotoba.net.libp2p.gossipsub-host-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [ed25519.core :as ed]
             [kotoba.net.libp2p.gossipsub-host :as host]
             [kotoba.net.libp2p.handshake :as handshake]
