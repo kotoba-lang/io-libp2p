@@ -11,7 +11,7 @@
   `kad.table` owns the routing table and its eviction rule; `kad.lookup` owns
   the iterative search. Neither is re-implemented here -- this supplies the
   socket and the loop they were written to be driven by."
-  (:require [clojure.set :as set]
+  (:require [kotoba.lang.coll :as set]
             [kad.key :as kad-key]
             [multiformats.multiaddr :as multiaddr]
             [multiformats.core :as mf]

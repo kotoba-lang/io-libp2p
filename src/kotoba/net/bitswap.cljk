@@ -6,7 +6,7 @@
    Scope: dedup/intersection/commit-log math only. No block transfer over
    any wire, no session/ledger accounting for tit-for-tat — see
    docs/ADR-kotoba-net-p2p-semantics.md."
-  (:require [clojure.set :as set]))
+  (:require [kotoba.lang.coll :as set]))
 
 ;; ---------------------------------------------------------------------------
 ;; want-list / have-list

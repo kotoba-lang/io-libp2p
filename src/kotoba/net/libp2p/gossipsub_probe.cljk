@@ -1,6 +1,6 @@
 (ns kotoba.net.libp2p.gossipsub-probe
   "Operator probe for a reference GossipSub v1.1 peer."
-  (:require [ed25519.core :as ed]
+  (:require [kotoba.bytes :as kbytes] [ed25519.core :as ed]
             [kotoba.net.libp2p.gossipsub-host :as host]
             [kotoba.net.libp2p.handshake :as handshake]
             [kotoba.net.libp2p.keys :as keys]
@@ -25,7 +25,7 @@
       (host/subscribe! router topic)
       (let [remote-subscription (deref subscription 3000 nil)]
         (host/heartbeat! router)
-        (let [published (host/publish! router topic (.getBytes ^String payload "UTF-8"))]
+        (let [published (host/publish! router topic (kbytes/utf8-bytes ^String payload))]
           ;; A successful socket write is not yet a reference-peer delivery;
           ;; leave the long-lived stream up for the remote event loop to read.
           (Thread/sleep 500)
