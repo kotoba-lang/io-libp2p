@@ -1,5 +1,5 @@
 (ns kotoba.net.transport.envelope-test
-  (:require [kotoba.test :refer [deftest testing is]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest testing is]]
             [kotoba.net.gossip :as gossip]
             [kotoba.net.transport.envelope :as envelope]))
 
@@ -12,7 +12,7 @@
       (try
         (envelope/resolve-peer peers "z")
         (is false "expected resolve-peer to throw for an unknown peer")
-        (catch clojure.lang.ExceptionInfo e
+        (catch kerror/ExceptionInfo e
           (is (= "z" (:peer-id (ex-data e))))
           (is (= #{"b"} (:known-peers (ex-data e)))))))))
 

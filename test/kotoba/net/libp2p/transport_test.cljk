@@ -1,5 +1,5 @@
 (ns kotoba.net.libp2p.transport-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.net.libp2p.transport :as transport]))
 
 (deftest address-kind-is-most-specific
@@ -28,7 +28,7 @@
     (is (= :stream ((:open-stream! connection) "/ipfs/graphsync/2.0.0")))
     (testing "an authenticated but different peer is still rejected"
       (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"candidate-limit"
+           kerror/ExceptionInfo #"candidate-limit"
            (transport/dial!
             (transport/registry
              1 {:quic-v1 (fn [_ _]
@@ -44,7 +44,7 @@
                                 (swap! calls inc)
                                 (throw (ex-info "down" {})))})]
     (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo #"candidate-limit"
+         kerror/ExceptionInfo #"candidate-limit"
          (transport/dial! registry
                           ["/udp/1/quic-v1" "/udp/2/quic-v1"]
                           {:max-candidates 99})))

@@ -1,5 +1,5 @@
 (ns kotoba.net.libp2p.node-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [ed25519.core :as ed]
             [kotoba.net.libp2p.connection :as connection]
             [kotoba.net.libp2p.dial :as dial]
@@ -53,7 +53,7 @@
         wrong (mf/base58btc (:peer-id (test-identity 72)))
         address (str "/ip4/127.0.0.1/tcp/" (:port listener) "/p2p/" wrong)]
     (try
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"peer-id-mismatch"
+      (is (thrown-with-msg? kerror/ExceptionInfo #"peer-id-mismatch"
                             (dial/dial! address (test-identity 73))))
       (finally ((:stop! listener))))))
 

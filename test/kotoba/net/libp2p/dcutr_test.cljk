@@ -1,5 +1,5 @@
 (ns kotoba.net.libp2p.dcutr-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.net.libp2p.dcutr :as dcutr]
             [kotoba.net.libp2p.socket :as socket]))
 
@@ -15,9 +15,9 @@
           (dcutr/encode-message {:type :connect :observed-addrs [addr-a addr-b]}))))
   (is (= {:type :sync :observed-addrs []}
          (dcutr/decode-message (dcutr/encode-message {:type :sync}))))
-  (is (thrown? clojure.lang.ExceptionInfo
+  (is (thrown? kerror/ExceptionInfo
                (dcutr/encode-message {:type :connect :observed-addrs []})))
-  (is (thrown? clojure.lang.ExceptionInfo
+  (is (thrown? kerror/ExceptionInfo
                (dcutr/decode-message (vec (repeat 4097 0))))))
 
 (deftest relay-stream-upgrades-both-sides-to-the-authenticated-peer
@@ -50,7 +50,7 @@
                      (fn [_] {:peer-id "initiator" :authenticated? true
                               :open-stream! identity :close! (fn [])})))]
     (testing "the initiator cannot increase the three-attempt protocol budget"
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (dcutr/initiate!
                     a [[9]] "responder" (constantly true)
                     (fn [_] (swap! attempts inc) (throw (ex-info "down" {}))))))
