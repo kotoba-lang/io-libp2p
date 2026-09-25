@@ -11,7 +11,8 @@
   ;; threw "Cannot read properties of undefined (reading 'Sha256')".
   #?(:cljs (:require [goog.crypt :as gcrypt]
                      [goog.crypt.Sha256]))
-  #?(:clj (:import [java.security MessageDigest])))
+  #?(:clj (:import [java.security MessageDigest]))
+  (:require [kotoba.bytes :as kbytes]))
 
 ;; ---------------------------------------------------------------------------
 ;; content-hash
@@ -35,7 +36,7 @@
   [payload]
   (let [s (if (string? payload) payload (pr-str payload))]
     #?(:clj (let [md (MessageDigest/getInstance "SHA-256")
-                  digest (.digest md (.getBytes s "UTF-8"))]
+                  digest (.digest md (kbytes/utf8-bytes s))]
               (bytes->hex digest))
        :cljs (let [sha (goog.crypt.Sha256.)]
                (.update sha (gcrypt/stringToUtf8ByteArray s))
